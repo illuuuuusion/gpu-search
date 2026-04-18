@@ -1,9 +1,17 @@
 import { env } from './config/env.js';
 import { loadProfiles } from './core/profileLoader.js';
 import { ScannerService } from './core/scanner.js';
+import { startEbayNotificationServer } from './integrations/ebay/notificationServer.js';
 import { ConsoleNotifier, MatrixNotifier } from './integrations/matrix/notifier.js';
 import { logger } from './utils/logger.js';
 async function bootstrap() {
+    await startEbayNotificationServer();
+    if (!env.SCANNER_ENABLED) {
+        logger.info({
+            ebayProvider: env.EBAY_PROVIDER,
+        }, 'Scanner disabled; webhook-only mode active');
+        return;
+    }
     const profiles = loadProfiles();
     const notifier = env.NOTIFIER_PROVIDER === 'matrix'
         ? new MatrixNotifier()

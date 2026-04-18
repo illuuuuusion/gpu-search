@@ -38,6 +38,7 @@ export class ScannerService {
                     let offset = 0;
                     let pageCount = 0;
                     let hasNext = true;
+                    let bucketAddedCount = 0;
                     while (hasNext && pageCount < env.EBAY_MAX_PAGES_PER_BUCKET) {
                         const page = await searchBucketListingsPage(bucket, profiles, offset);
                         pageCount += 1;
@@ -50,6 +51,7 @@ export class ScannerService {
                             }
                             if (!collectedListings.has(listing.id)) {
                                 collectedListings.set(listing.id, listing);
+                                bucketAddedCount += 1;
                             }
                         }
                         if (reachedKnownWindow || page.listings.length === 0) {
@@ -61,7 +63,8 @@ export class ScannerService {
                     logger.info({
                         bucket: bucket.name,
                         pageCount,
-                        uniqueListings: collectedListings.size,
+                        bucketAddedCount,
+                        totalUniqueListings: collectedListings.size,
                     }, 'Finished bucket scan');
                 }
                 catch (error) {

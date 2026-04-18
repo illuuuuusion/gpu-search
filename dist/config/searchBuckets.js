@@ -30,6 +30,7 @@ export const searchBuckets = [
         profileMatchers: ['amd rdna', 'intel arc'],
     },
 ];
+// 5 Buckets bisher
 export function profileBelongsToBucket(bucket, profile) {
     const haystack = `${profile.name} ${profile.category}`.toLowerCase();
     return bucket.profileMatchers.some(matcher => haystack.includes(matcher));
