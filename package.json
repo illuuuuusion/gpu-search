@@ -1,0 +1,26 @@
+{
+  "name": "gpu-search",
+  "version": "0.1.0",
+  "private": true,
+  "description": "GPU watchlist scanner with eBay search, filtering, scoring and Matrix notifications",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "lint": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "axios": "^1.9.0",
+    "dotenv": "^16.5.0",
+    "matrix-bot-sdk": "^0.7.1",
+    "pino": "^9.7.0",
+    "zod": "^3.24.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3",
+    "pino-pretty": "^13.0.0"
+  }
+}
