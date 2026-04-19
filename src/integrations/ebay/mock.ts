@@ -23,14 +23,16 @@ function buildListing(
   const title = overrides.title ?? profile.aliases[0];
   const subtitle = overrides.subtitle;
   const shortDescription = overrides.shortDescription;
+  const description = overrides.description;
   const aspects = overrides.aspects ?? [];
-  const identity = extractListingIdentity({ title, subtitle, shortDescription, aspects });
+  const identity = extractListingIdentity({ title, subtitle, shortDescription, description, aspects });
 
   return {
     id: `mock-${idBase}-${suffix}`,
     title,
     subtitle,
     shortDescription,
+    description,
     itemWebUrl: overrides.itemWebUrl ?? `https://example.invalid/listing/mock-${idBase}-${suffix}`,
     itemOriginDate,
     priceEur,

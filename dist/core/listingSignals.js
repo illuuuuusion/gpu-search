@@ -110,7 +110,7 @@ function detectBoardModel(input) {
     if (explicitModel) {
         return explicitModel;
     }
-    for (const text of [input.subtitle, input.shortDescription]) {
+    for (const text of [input.subtitle, input.shortDescription, input.description, ...(input.extraTexts ?? [])]) {
         const cleaned = text?.replace(/\s+/g, ' ').trim();
         if (!cleaned)
             continue;
@@ -129,6 +129,8 @@ export function extractListingIdentity(input) {
         input.title,
         input.subtitle,
         input.shortDescription,
+        input.description,
+        ...(input.extraTexts ?? []),
         ...input.aspects.map(aspect => aspect.value),
     ]);
     const gpuModel = detectGpuModel([
@@ -136,6 +138,8 @@ export function extractListingIdentity(input) {
         input.title,
         input.subtitle,
         input.shortDescription,
+        input.description,
+        ...(input.extraTexts ?? []),
     ]);
     const boardModel = detectBoardModel(input);
     return {
@@ -149,6 +153,7 @@ export function getListingTextSources(listing) {
         { label: 'title', text: listing.title },
         { label: 'subtitle', text: listing.subtitle },
         { label: 'short_description', text: listing.shortDescription },
+        { label: 'description', text: listing.description },
         { label: 'condition', text: listing.condition },
         { label: 'board_brand', text: listing.boardBrand },
         { label: 'board_model', text: listing.boardModel },
@@ -166,6 +171,7 @@ export function buildListingSearchText(listing) {
         listing.title,
         listing.subtitle,
         listing.shortDescription,
+        listing.description,
         listing.boardBrand,
         listing.boardModel,
         listing.gpuModel,
@@ -181,6 +187,7 @@ export function buildListingReferenceText(listing) {
         listing.title,
         listing.subtitle,
         listing.shortDescription,
+        listing.description,
         ...highSignalAspectValues,
     ]).join(' ');
 }

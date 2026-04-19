@@ -41,8 +41,12 @@ export function formatListingMessage(result: EvaluatedListing): AlertMessage {
   }
 
   if (result.referenceMatch) {
+    const referenceLabel = result.referenceMatch.reference.source === 'override'
+      ? 'Fallback-Referenz'
+      : 'Geizhals neu';
+
     fields.push(
-      { name: 'Geizhals neu', value: `${result.referenceMatch.priceEur.toFixed(2)} €`, inline: true },
+      { name: referenceLabel, value: `${result.referenceMatch.priceEur.toFixed(2)} €`, inline: true },
       {
         name: 'Rabatt vs Geizhals',
         value: `${(result.retailDiscountPercent ?? 0).toFixed(2)}%`,
@@ -59,6 +63,14 @@ export function formatListingMessage(result: EvaluatedListing): AlertMessage {
         inline: false,
       },
     );
+
+    if (result.referenceMatch.reference.source === 'override') {
+      fields.push({
+        name: 'Referenzquelle',
+        value: result.referenceMatch.reference.note ?? 'Manueller Override-Fallback',
+        inline: false,
+      });
+    }
   }
 
   if (result.marketStats) {

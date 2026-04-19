@@ -9,6 +9,10 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "refresh:references": "node dist/scripts/refreshReferences.js",
+    "test:mock-scan": "node dist/scripts/testMockScan.js",
+    "browser:doctor": "node dist/scripts/browserDoctor.js",
+    "browser:prepare-libs": "node dist/scripts/prepareChromiumHost.js",
+    "browser:install:firefox": "npx playwright install firefox",
     "lint": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {

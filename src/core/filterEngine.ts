@@ -210,6 +210,11 @@ export function evaluateListing(
     return rejectedResult(profile, listing, 'EXCLUDED', reasons);
   }
 
+  if (listing.priceEur <= 0 || listing.totalEur <= 0) {
+    reasons.push(`invalid_price=${listing.totalEur}`);
+    return rejectedResult(profile, listing, 'EXCLUDED', reasons);
+  }
+
   const healthResult = resolveHealth(listing);
   reasons.push(...healthResult.reasons);
 

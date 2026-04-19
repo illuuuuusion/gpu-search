@@ -36,12 +36,13 @@ export interface MarketReferenceFamily {
 }
 
 export interface MarketReference {
-  source: 'geizhals';
+  source: 'geizhals' | 'override';
   query: string;
   url: string;
   lowestPriceEur: number;
   fetchedAt: string;
   families: MarketReferenceFamily[];
+  note?: string;
 }
 
 export interface MarketReferenceMatch {
@@ -77,6 +78,7 @@ export interface EbayListing {
   title: string;
   subtitle?: string;
   shortDescription?: string;
+  description?: string;
   itemWebUrl: string;
   itemOriginDate?: string;
   priceEur: number;

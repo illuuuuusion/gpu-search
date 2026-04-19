@@ -2,7 +2,10 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { env } from '../config/env.js';
 import { logger } from '../utils/logger.js';
-const STATE_PATH = path.resolve(process.cwd(), 'data/scanner-state.json');
+const DEFAULT_STATE_PATH = path.resolve(process.cwd(), 'data/scanner-state.json');
+function getStatePath() {
+    return env.SCANNER_STATE_PATH ?? DEFAULT_STATE_PATH;
+}
 function cutoffTimestamp(days, now = Date.now()) {
     return now - days * 24 * 60 * 60 * 1000;
 }
@@ -73,9 +76,23 @@ export class ScannerStateStore {
             logger.warn({ error, listingId: result.listing.id }, 'Failed to persist scanner state');
         }
     }
+    async recordObservation(result) {
+        const observedAt = new Date().toISOString();
+        this.observations = [
+            ...this.observations.filter(observation => observation.listingId !== result.listing.id),
+            this.toObservation(result, observedAt),
+        ];
+        this.prune(observedAt);
+        try {
+            await this.persist();
+        }
+        catch (error) {
+            logger.warn({ error, listingId: result.listing.id }, 'Failed to persist scanner observation');
+        }
+    }
     async loadInternal() {
         try {
-            const raw = await fs.readFile(STATE_PATH, 'utf8');
+            const raw = await fs.readFile(getStatePath(), 'utf8');
             const parsed = JSON.parse(raw);
             for (const entry of parsed.seen ?? []) {
                 if (entry?.listingId && entry?.sentAt && entry?.profileName) {
@@ -125,8 +142,9 @@ export class ScannerStateStore {
         };
     }
     async persist() {
-        await fs.mkdir(path.dirname(STATE_PATH), { recursive: true });
-        await fs.writeFile(STATE_PATH, JSON.stringify({
+        const statePath = getStatePath();
+        await fs.mkdir(path.dirname(statePath), { recursive: true });
+        await fs.writeFile(statePath, JSON.stringify({
             version: 1,
             updatedAt: new Date().toISOString(),
             seen: Array.from(this.seen.values()).sort((left, right) => left.sentAt.localeCompare(right.sentAt)),

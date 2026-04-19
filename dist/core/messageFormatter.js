@@ -32,7 +32,10 @@ export function formatListingMessage(result) {
         fields.push({ name: 'GPU-Merkmal', value: result.listing.gpuModel, inline: true });
     }
     if (result.referenceMatch) {
-        fields.push({ name: 'Geizhals neu', value: `${result.referenceMatch.priceEur.toFixed(2)} €`, inline: true }, {
+        const referenceLabel = result.referenceMatch.reference.source === 'override'
+            ? 'Fallback-Referenz'
+            : 'Geizhals neu';
+        fields.push({ name: referenceLabel, value: `${result.referenceMatch.priceEur.toFixed(2)} €`, inline: true }, {
             name: 'Rabatt vs Geizhals',
             value: `${(result.retailDiscountPercent ?? 0).toFixed(2)}%`,
             inline: true,
@@ -45,6 +48,13 @@ export function formatListingMessage(result) {
             value: result.referenceMatch.matchedTitle,
             inline: false,
         });
+        if (result.referenceMatch.reference.source === 'override') {
+            fields.push({
+                name: 'Referenzquelle',
+                value: result.referenceMatch.reference.note ?? 'Manueller Override-Fallback',
+                inline: false,
+            });
+        }
     }
     if (result.marketStats) {
         fields.push({

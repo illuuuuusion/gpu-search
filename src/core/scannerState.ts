@@ -4,7 +4,11 @@ import { env } from '../config/env.js';
 import type { EvaluatedListing, OfferType, ProfileMarketStats } from '../types/domain.js';
 import { logger } from '../utils/logger.js';
 
-const STATE_PATH = path.resolve(process.cwd(), 'data/scanner-state.json');
+const DEFAULT_STATE_PATH = path.resolve(process.cwd(), 'data/scanner-state.json');
+
+function getStatePath(): string {
+  return env.SCANNER_STATE_PATH ?? DEFAULT_STATE_PATH;
+}
 
 interface SeenRecord {
   listingId: string;
@@ -112,9 +116,24 @@ export class ScannerStateStore {
     }
   }
 
+  async recordObservation(result: EvaluatedListing): Promise<void> {
+    const observedAt = new Date().toISOString();
+    this.observations = [
+      ...this.observations.filter(observation => observation.listingId !== result.listing.id),
+      this.toObservation(result, observedAt),
+    ];
+    this.prune(observedAt);
+
+    try {
+      await this.persist();
+    } catch (error) {
+      logger.warn({ error, listingId: result.listing.id }, 'Failed to persist scanner observation');
+    }
+  }
+
   private async loadInternal(): Promise<void> {
     try {
-      const raw = await fs.readFile(STATE_PATH, 'utf8');
+      const raw = await fs.readFile(getStatePath(), 'utf8');
       const parsed = JSON.parse(raw) as ScannerStateFile;
 
       for (const entry of parsed.seen ?? []) {
@@ -176,8 +195,9 @@ export class ScannerStateStore {
   }
 
   private async persist(): Promise<void> {
-    await fs.mkdir(path.dirname(STATE_PATH), { recursive: true });
-    await fs.writeFile(STATE_PATH, JSON.stringify({
+    const statePath = getStatePath();
+    await fs.mkdir(path.dirname(statePath), { recursive: true });
+    await fs.writeFile(statePath, JSON.stringify({
       version: 1,
       updatedAt: new Date().toISOString(),
       seen: Array.from(this.seen.values()).sort((left, right) => left.sentAt.localeCompare(right.sentAt)),

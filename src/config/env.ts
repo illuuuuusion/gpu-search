@@ -27,18 +27,22 @@ const envSchema = z.object({
   EBAY_SEARCH_PAGE_SIZE: z.coerce.number().default(200),
   EBAY_MAX_PAGES_PER_BUCKET: z.coerce.number().default(3),
   MARKET_REFERENCE_PROVIDER: z.enum(['none', 'geizhals']).default('geizhals'),
+  MARKET_REFERENCE_CACHE_PATH: optionalString,
   MARKET_REFERENCE_REFRESH_HOUR: z.coerce.number().min(0).max(23).default(1),
   MARKET_REFERENCE_CACHE_MAX_AGE_HOURS: z.coerce.number().default(30),
   GEIZHALS_REQUEST_TIMEOUT_MS: z.coerce.number().default(30000),
   GEIZHALS_MAX_FAMILY_LINKS_PER_PROFILE: z.coerce.number().default(12),
   GEIZHALS_VARIANT_MATCH_THRESHOLD: z.coerce.number().default(0.42),
+  GEIZHALS_PROFILE_DELAY_MS: z.coerce.number().default(750),
   GEIZHALS_BROWSER_HEADLESS: booleanFromString.default(true),
+  GEIZHALS_BROWSER_ENGINE: z.enum(['auto', 'chromium', 'firefox', 'webkit']).default('auto'),
   NOTIFIER_PROVIDER: z.enum(['console', 'discord']).default('console'),
   DISCORD_BOT_TOKEN: optionalString,
   DISCORD_CHANNEL_ID: optionalString,
   DISCORD_SEND_DELAY_MS: z.coerce.number().default(750),
   DISCORD_RATE_LIMIT_BUFFER_MS: z.coerce.number().default(250),
   DISCORD_MAX_SEND_RETRIES: z.coerce.number().default(5),
+  SCANNER_STATE_PATH: optionalString,
   SCANNER_SEEN_RETENTION_DAYS: z.coerce.number().default(30),
   SCANNER_STATS_WINDOW_DAYS: z.coerce.number().default(90),
   POLL_INTERVAL_SECONDS: z.coerce.number().default(300),
@@ -63,18 +67,22 @@ interface AppEnv {
   EBAY_SEARCH_PAGE_SIZE: number;
   EBAY_MAX_PAGES_PER_BUCKET: number;
   MARKET_REFERENCE_PROVIDER: 'none' | 'geizhals';
+  MARKET_REFERENCE_CACHE_PATH?: string;
   MARKET_REFERENCE_REFRESH_HOUR: number;
   MARKET_REFERENCE_CACHE_MAX_AGE_HOURS: number;
   GEIZHALS_REQUEST_TIMEOUT_MS: number;
   GEIZHALS_MAX_FAMILY_LINKS_PER_PROFILE: number;
   GEIZHALS_VARIANT_MATCH_THRESHOLD: number;
+  GEIZHALS_PROFILE_DELAY_MS: number;
   GEIZHALS_BROWSER_HEADLESS: boolean;
+  GEIZHALS_BROWSER_ENGINE: 'auto' | 'chromium' | 'firefox' | 'webkit';
   NOTIFIER_PROVIDER: 'console' | 'discord';
   DISCORD_BOT_TOKEN: string;
   DISCORD_CHANNEL_ID: string;
   DISCORD_SEND_DELAY_MS: number;
   DISCORD_RATE_LIMIT_BUFFER_MS: number;
   DISCORD_MAX_SEND_RETRIES: number;
+  SCANNER_STATE_PATH?: string;
   SCANNER_SEEN_RETENTION_DAYS: number;
   SCANNER_STATS_WINDOW_DAYS: number;
   POLL_INTERVAL_SECONDS: number;

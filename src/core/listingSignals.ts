@@ -123,6 +123,8 @@ function detectBoardModel(input: {
   aspects: EbayListingAspect[];
   subtitle?: string;
   shortDescription?: string;
+  description?: string;
+  extraTexts?: string[];
 }): string | undefined {
   const explicitModel = collectAspectValues(input.aspects, MODEL_ASPECT_PATTERNS)
     .find(candidate => !GENERIC_MODEL_VALUES.has(normalizeComparableText(candidate)));
@@ -130,7 +132,7 @@ function detectBoardModel(input: {
     return explicitModel;
   }
 
-  for (const text of [input.subtitle, input.shortDescription]) {
+  for (const text of [input.subtitle, input.shortDescription, input.description, ...(input.extraTexts ?? [])]) {
     const cleaned = text?.replace(/\s+/g, ' ').trim();
     if (!cleaned) continue;
     if (GENERIC_MODEL_VALUES.has(normalizeComparableText(cleaned))) continue;
@@ -146,7 +148,9 @@ export function extractListingIdentity(input: {
   title: string;
   subtitle?: string;
   shortDescription?: string;
+  description?: string;
   aspects: EbayListingAspect[];
+  extraTexts?: string[];
 }): Pick<EbayListing, 'boardBrand' | 'boardModel' | 'gpuModel'> {
   const aspectBrand = collectAspectValues(input.aspects, BRAND_ASPECT_PATTERNS)[0];
   const boardBrand = detectBoardBrand([
@@ -154,6 +158,8 @@ export function extractListingIdentity(input: {
     input.title,
     input.subtitle,
     input.shortDescription,
+    input.description,
+    ...(input.extraTexts ?? []),
     ...input.aspects.map(aspect => aspect.value),
   ]);
 
@@ -162,6 +168,8 @@ export function extractListingIdentity(input: {
     input.title,
     input.subtitle,
     input.shortDescription,
+    input.description,
+    ...(input.extraTexts ?? []),
   ]);
 
   const boardModel = detectBoardModel(input);
@@ -178,6 +186,7 @@ export function getListingTextSources(listing: EbayListing): Array<{ label: stri
     { label: 'title', text: listing.title },
     { label: 'subtitle', text: listing.subtitle },
     { label: 'short_description', text: listing.shortDescription },
+    { label: 'description', text: listing.description },
     { label: 'condition', text: listing.condition },
     { label: 'board_brand', text: listing.boardBrand },
     { label: 'board_model', text: listing.boardModel },
@@ -197,6 +206,7 @@ export function buildListingSearchText(listing: EbayListing): string {
     listing.title,
     listing.subtitle,
     listing.shortDescription,
+    listing.description,
     listing.boardBrand,
     listing.boardModel,
     listing.gpuModel,
@@ -213,6 +223,7 @@ export function buildListingReferenceText(listing: EbayListing): string {
     listing.title,
     listing.subtitle,
     listing.shortDescription,
+    listing.description,
     ...highSignalAspectValues,
   ]).join(' ');
 }

@@ -56,12 +56,37 @@ src/
    - Fuer tägliche Referenzpreise `MARKET_REFERENCE_PROVIDER=geizhals` lassen
    - Der Cache wird standardmäßig täglich um `01:00` lokal aktualisiert und unter `data/geizhals-reference-cache.json` gespeichert
    - Scanner-`seen` und Marktstatistiken landen unter `data/scanner-state.json`
-   - Der Geizhals-Browser-Fetch nutzt zuerst das volle Playwright-Chromium und fällt dann auf das Default-Binary zurück
+   - Der Geizhals-Browser-Fetch nutzt standardmäßig `chromium`, `firefox` und `webkit` als Fallback-Kette
+   - Mit `GEIZHALS_BROWSER_ENGINE` kannst du den Browser gezielt auf `chromium`, `firefox` oder `webkit` festlegen
    - Wenn Chromium auf dem Host trotz lokaler Libs nicht starten darf, arbeitet der Scanner mit Cache bzw. statischen Profil-Limits weiter
 4. Entwicklung starten
    ```bash
    npm run dev
    ```
+
+## Lokale Tests
+
+- Ein end-to-end Mock-Scan mit Discord oder Console und frischem Test-State:
+  ```bash
+  npm run build
+  npm run test:mock-scan
+  ```
+- Optional nur für ein Modell:
+  ```bash
+  TEST_PROFILE_NAME="RTX 5080" npm run test:mock-scan
+  ```
+- Browser-Host prüfen:
+  ```bash
+  npm run browser:doctor
+  ```
+- Fehlende Chromium-Libs im User-Space nachziehen:
+  ```bash
+  npm run browser:prepare-libs
+  ```
+- Optional Firefox für Playwright installieren:
+  ```bash
+  npm run browser:install:firefox
+  ```
 
 ## Was schon implementiert ist
 
@@ -82,6 +107,7 @@ src/
   - Auktionsrestzeit unter 5 Stunden
 - Discord-Notifier
 - täglicher Geizhals-Referenzpreis-Cache mit Familien, Varianten und Match-Fallback
+- erweiterte Board-/Modellerkennung aus `localizedAspects`, Descriptor-/Property-Feldern und Beschreibungstexten
 - persistente `seen`-Speicherung und rollierende Durchschnittswerte für Score, Gebraucht- und Defektpreise
 
 ## Was ich als Nächstes ergänzen würde

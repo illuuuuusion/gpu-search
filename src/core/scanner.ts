@@ -113,6 +113,8 @@ export class ScannerService {
           marketStats: this.state.previewStats(result),
         };
 
+        await this.state.recordObservation(resultWithStats);
+
         try {
           await this.notifier.send(formatListingMessage(resultWithStats));
           await this.state.recordSent(resultWithStats);

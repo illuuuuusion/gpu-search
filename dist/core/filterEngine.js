@@ -158,6 +158,10 @@ export function evaluateListing(profile, listing, referenceMatch) {
         reasons.push(`seller_feedback_below_threshold=${listing.sellerFeedbackPercent}`);
         return rejectedResult(profile, listing, 'EXCLUDED', reasons);
     }
+    if (listing.priceEur <= 0 || listing.totalEur <= 0) {
+        reasons.push(`invalid_price=${listing.totalEur}`);
+        return rejectedResult(profile, listing, 'EXCLUDED', reasons);
+    }
     const healthResult = resolveHealth(listing);
     reasons.push(...healthResult.reasons);
     if (healthResult.health === 'EXCLUDED') {
