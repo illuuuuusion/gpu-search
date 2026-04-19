@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { env } from '../../config/env.js';
+import { env, getEbayApiBaseUrl } from '../../config/env.js';
 
 let cachedToken: { accessToken: string; expiresAt: number } | null = null;
 
@@ -12,7 +12,7 @@ export async function getEbayAccessToken(): Promise<string> {
     scope: 'https://api.ebay.com/oauth/api_scope',
   });
 
-  const response = await axios.post('https://api.ebay.com/identity/v1/oauth2/token', body.toString(), {
+  const response = await axios.post(`${getEbayApiBaseUrl()}/identity/v1/oauth2/token`, body.toString(), {
     headers: {
       Authorization: `Basic ${credentials}`,
       'Content-Type': 'application/x-www-form-urlencoded',

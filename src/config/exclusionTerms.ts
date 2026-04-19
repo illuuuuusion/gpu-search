@@ -7,7 +7,13 @@ export const exclusionTerms = [
   'for parts no board', 'brandschaden', 'wasserschaden komplett',
   'fully water damaged', 'burned', 'abgebrannt', 'komplett defekt ohne reparaturmöglichkeit',
   'verschmort', 'gerissen', 'broken in half', 'physical damage', 'crushed',
-  'cracked pcb', 'broken pcb', 'fake', 'rebrand', 'vbios mod', 'mining mod no display',
+  'cracked pcb', 'broken pcb', 'fake', 'rebrand', 'vbios mod', 'mining mod no display', 'ghetto-mod',
+  'stencil', 'reballing', 'bga', 'template', 'ghetto mod', 'ghetto',
+  'fan replacement', 'replacement fan', 'gpu fan', 'cooling fan',
+  'lüfter', 'ersatzlüfter', 'kühler', 'cooler', 'heatsink',
+  'shroud', 'backplate', 'bracket', 'mount', 'adapter',
+  'waterblock', 'wasserkühler',
+  'case fan', 'cpu cooler', 'riser cable'
 ];
 
 export const defectTerms = [

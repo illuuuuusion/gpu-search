@@ -5,6 +5,7 @@ import { searchBuckets } from '../config/searchBuckets.js';
 import { searchBucketListingsPage } from '../integrations/ebay/client.js';
 import { logger } from '../utils/logger.js';
 import { env } from '../config/env.js';
+import { ScannerStateStore } from './scannerState.js';
 function isNewerThanCutoff(listing, cutoff) {
     if (!cutoff || !listing.itemOriginDate)
         return true;
@@ -12,11 +13,20 @@ function isNewerThanCutoff(listing, cutoff) {
 }
 export class ScannerService {
     notifier;
-    seen = new Set();
+    marketReferences;
     isRunning = false;
     bucketWatermarks = new Map();
-    constructor(notifier) {
+    state = new ScannerStateStore();
+    initializationPromise = null;
+    constructor(notifier, marketReferences) {
         this.notifier = notifier;
+        this.marketReferences = marketReferences;
+    }
+    async ensureInitialized() {
+        if (!this.initializationPromise) {
+            this.initializationPromise = this.state.load();
+        }
+        await this.initializationPromise;
     }
     async runOnce(profiles) {
         if (this.isRunning) {
@@ -25,6 +35,7 @@ export class ScannerService {
         }
         this.isRunning = true;
         try {
+            await this.ensureInitialized();
             const collectedListings = new Map();
             for (const bucket of searchBuckets) {
                 const previousWatermark = this.bucketWatermarks.get(bucket.id);
@@ -75,14 +86,19 @@ export class ScannerService {
                 const match = selectProfileForListing(profiles, listing);
                 if (!match)
                     continue;
-                const result = evaluateListing(match.profile, listing);
+                const referenceMatch = this.marketReferences?.matchReference(match.profile, listing);
+                const result = evaluateListing(match.profile, listing, referenceMatch);
                 if (!result.accepted)
                     continue;
-                if (this.seen.has(listing.id))
+                if (this.state.hasSeen(listing.id))
                     continue;
+                const resultWithStats = {
+                    ...result,
+                    marketStats: this.state.previewStats(result),
+                };
                 try {
-                    await this.notifier.send(formatListingMessage(result));
-                    this.seen.add(listing.id);
+                    await this.notifier.send(formatListingMessage(resultWithStats));
+                    await this.state.recordSent(resultWithStats);
                 }
                 catch (error) {
                     logger.error({

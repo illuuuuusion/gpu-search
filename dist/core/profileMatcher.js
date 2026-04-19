@@ -1,12 +1,10 @@
+import { buildListingSearchText, compactComparableText } from './listingSignals.js';
 function normalizeText(value) {
     return value
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, ' ')
         .trim()
         .replace(/\s+/g, ' ');
-}
-function compactText(value) {
-    return normalizeText(value).replace(/\s+/g, '');
 }
 function listingMatchesAlias(titleNormalized, titleCompact, alias) {
     const aliasNormalized = normalizeText(alias);
@@ -17,16 +15,21 @@ function listingMatchesAlias(titleNormalized, titleCompact, alias) {
 }
 export function selectProfileForListing(profiles, listing) {
     const titleNormalized = normalizeText(listing.title);
-    const titleCompact = compactText(listing.title);
+    const titleCompact = compactComparableText(listing.title);
+    const searchText = buildListingSearchText(listing);
+    const searchNormalized = normalizeText(searchText);
+    const searchCompact = compactComparableText(searchText);
     const matches = [];
     for (const profile of profiles) {
         for (const alias of profile.aliases) {
-            if (!listingMatchesAlias(titleNormalized, titleCompact, alias))
+            const titleMatched = listingMatchesAlias(titleNormalized, titleCompact, alias);
+            const extendedMatched = titleMatched || listingMatchesAlias(searchNormalized, searchCompact, alias);
+            if (!extendedMatched)
                 continue;
             matches.push({
                 profile,
                 alias,
-                score: normalizeText(alias).length,
+                score: normalizeText(alias).length + (titleMatched ? 1000 : 0),
             });
         }
     }

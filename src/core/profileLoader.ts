@@ -23,6 +23,7 @@ const profileSchema: z.ZodType<GpuProfile> = z.object({
   vramVariants: z.boolean(),
   excludeNew: z.boolean(),
   onlyGermany: z.boolean(),
+  minimumRetailDiscountPercent: z.number().optional(),
   prices: priceSchema,
 });
 

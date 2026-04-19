@@ -4,10 +4,12 @@ import { selectProfileForListing } from './profileMatcher.js';
 import { searchBuckets } from '../config/searchBuckets.js';
 import { searchBucketListingsPage } from '../integrations/ebay/client.js';
 import type { GpuProfile } from '../types/domain.js';
-import type { Notifier } from '../integrations/matrix/notifier.js';
+import type { Notifier } from '../integrations/notifier.js';
 import type { EbayListing } from '../types/domain.js';
+import type { MarketReferenceReader } from '../integrations/geizhals/referenceService.js';
 import { logger } from '../utils/logger.js';
 import { env } from '../config/env.js';
+import { ScannerStateStore } from './scannerState.js';
 
 function isNewerThanCutoff(listing: EbayListing, cutoff: string | undefined): boolean {
   if (!cutoff || !listing.itemOriginDate) return true;
@@ -15,11 +17,23 @@ function isNewerThanCutoff(listing: EbayListing, cutoff: string | undefined): bo
 }
 
 export class ScannerService {
-  private seen = new Set<string>();
   private isRunning = false;
   private bucketWatermarks = new Map<string, string>();
+  private readonly state = new ScannerStateStore();
+  private initializationPromise: Promise<void> | null = null;
 
-  constructor(private readonly notifier: Notifier) {}
+  constructor(
+    private readonly notifier: Notifier,
+    private readonly marketReferences?: MarketReferenceReader,
+  ) {}
+
+  private async ensureInitialized(): Promise<void> {
+    if (!this.initializationPromise) {
+      this.initializationPromise = this.state.load();
+    }
+
+    await this.initializationPromise;
+  }
 
   async runOnce(profiles: GpuProfile[]): Promise<void> {
     if (this.isRunning) {
@@ -30,6 +44,7 @@ export class ScannerService {
     this.isRunning = true;
 
     try {
+      await this.ensureInitialized();
       const collectedListings = new Map<string, EbayListing>();
 
       for (const bucket of searchBuckets) {
@@ -88,13 +103,19 @@ export class ScannerService {
         const match = selectProfileForListing(profiles, listing);
         if (!match) continue;
 
-        const result = evaluateListing(match.profile, listing);
+        const referenceMatch = this.marketReferences?.matchReference(match.profile, listing);
+        const result = evaluateListing(match.profile, listing, referenceMatch);
         if (!result.accepted) continue;
-        if (this.seen.has(listing.id)) continue;
+        if (this.state.hasSeen(listing.id)) continue;
+
+        const resultWithStats = {
+          ...result,
+          marketStats: this.state.previewStats(result),
+        };
 
         try {
-          await this.notifier.send(formatListingMessage(result));
-          this.seen.add(listing.id);
+          await this.notifier.send(formatListingMessage(resultWithStats));
+          await this.state.recordSent(resultWithStats);
         } catch (error) {
           logger.error({
             error,

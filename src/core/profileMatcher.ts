@@ -1,4 +1,5 @@
 import type { EbayListing, GpuProfile } from '../types/domain.js';
+import { buildListingSearchText, compactComparableText } from './listingSignals.js';
 
 interface ProfileMatch {
   profile: GpuProfile;
@@ -14,10 +15,6 @@ function normalizeText(value: string): string {
     .replace(/\s+/g, ' ');
 }
 
-function compactText(value: string): string {
-  return normalizeText(value).replace(/\s+/g, '');
-}
-
 function listingMatchesAlias(titleNormalized: string, titleCompact: string, alias: string): boolean {
   const aliasNormalized = normalizeText(alias);
   if (!aliasNormalized) return false;
@@ -28,17 +25,22 @@ function listingMatchesAlias(titleNormalized: string, titleCompact: string, alia
 
 export function selectProfileForListing(profiles: GpuProfile[], listing: EbayListing): ProfileMatch | null {
   const titleNormalized = normalizeText(listing.title);
-  const titleCompact = compactText(listing.title);
+  const titleCompact = compactComparableText(listing.title);
+  const searchText = buildListingSearchText(listing);
+  const searchNormalized = normalizeText(searchText);
+  const searchCompact = compactComparableText(searchText);
   const matches: ProfileMatch[] = [];
 
   for (const profile of profiles) {
     for (const alias of profile.aliases) {
-      if (!listingMatchesAlias(titleNormalized, titleCompact, alias)) continue;
+      const titleMatched = listingMatchesAlias(titleNormalized, titleCompact, alias);
+      const extendedMatched = titleMatched || listingMatchesAlias(searchNormalized, searchCompact, alias);
+      if (!extendedMatched) continue;
 
       matches.push({
         profile,
         alias,
-        score: normalizeText(alias).length,
+        score: normalizeText(alias).length + (titleMatched ? 1000 : 0),
       });
     }
   }

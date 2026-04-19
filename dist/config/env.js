@@ -1,28 +1,40 @@
 import 'dotenv/config';
 import { z } from 'zod';
 const optionalString = z.preprocess(value => typeof value === 'string' ? value.trim() || undefined : value, z.string().optional());
-const optionalUrl = z.preprocess(value => typeof value === 'string' ? value.trim() || undefined : value, z.string().url().optional());
-const optionalVerificationToken = z.preprocess(value => typeof value === 'string' ? value.trim() || undefined : value, z.string().regex(/^[A-Za-z0-9_-]{32,80}$/).optional());
+const booleanFromString = z.preprocess((value) => {
+    if (typeof value === 'boolean')
+        return value;
+    if (typeof value !== 'string')
+        return value;
+    const normalized = value.trim().toLowerCase();
+    if (['true', '1', 'yes', 'on'].includes(normalized))
+        return true;
+    if (['false', '0', 'no', 'off'].includes(normalized))
+        return false;
+    return value;
+}, z.boolean());
 const envSchema = z.object({
-    EBAY_PROVIDER: z.enum(['live', 'mock']).default('live'),
+    EBAY_PROVIDER: z.enum(['live', 'sandbox', 'mock']).default('live'),
     EBAY_APP_ID: optionalString,
     EBAY_CLIENT_SECRET: optionalString,
     EBAY_MARKETPLACE_ID: z.string().default('EBAY_DE'),
     EBAY_SEARCH_PAGE_SIZE: z.coerce.number().default(200),
     EBAY_MAX_PAGES_PER_BUCKET: z.coerce.number().default(3),
-    EBAY_NOTIFICATION_BIND_HOST: z.string().default('0.0.0.0'),
-    EBAY_NOTIFICATION_PORT: z.coerce.number().int().positive().default(3001),
-    EBAY_NOTIFICATION_PATH: z.string().startsWith('/').default('/webhooks/ebay/marketplace-account-deletion'),
-    EBAY_NOTIFICATION_PUBLIC_URL: optionalUrl,
-    EBAY_NOTIFICATION_VERIFICATION_TOKEN: optionalVerificationToken,
-    SCANNER_ENABLED: z.enum(['true', 'false']).default('true').transform(value => value === 'true'),
-    NOTIFIER_PROVIDER: z.enum(['console', 'matrix']).default('console'),
-    MATRIX_HOMESERVER_URL: optionalUrl,
-    MATRIX_ACCESS_TOKEN: optionalString,
-    MATRIX_ROOM_ID: optionalString,
-    MATRIX_SEND_DELAY_MS: z.coerce.number().default(750),
-    MATRIX_RATE_LIMIT_BUFFER_MS: z.coerce.number().default(250),
-    MATRIX_MAX_SEND_RETRIES: z.coerce.number().default(5),
+    MARKET_REFERENCE_PROVIDER: z.enum(['none', 'geizhals']).default('geizhals'),
+    MARKET_REFERENCE_REFRESH_HOUR: z.coerce.number().min(0).max(23).default(1),
+    MARKET_REFERENCE_CACHE_MAX_AGE_HOURS: z.coerce.number().default(30),
+    GEIZHALS_REQUEST_TIMEOUT_MS: z.coerce.number().default(30000),
+    GEIZHALS_MAX_FAMILY_LINKS_PER_PROFILE: z.coerce.number().default(12),
+    GEIZHALS_VARIANT_MATCH_THRESHOLD: z.coerce.number().default(0.42),
+    GEIZHALS_BROWSER_HEADLESS: booleanFromString.default(true),
+    NOTIFIER_PROVIDER: z.enum(['console', 'discord']).default('console'),
+    DISCORD_BOT_TOKEN: optionalString,
+    DISCORD_CHANNEL_ID: optionalString,
+    DISCORD_SEND_DELAY_MS: z.coerce.number().default(750),
+    DISCORD_RATE_LIMIT_BUFFER_MS: z.coerce.number().default(250),
+    DISCORD_MAX_SEND_RETRIES: z.coerce.number().default(5),
+    SCANNER_SEEN_RETENTION_DAYS: z.coerce.number().default(30),
+    SCANNER_STATS_WINDOW_DAYS: z.coerce.number().default(90),
     POLL_INTERVAL_SECONDS: z.coerce.number().default(300),
     ALLOW_COUNTRIES: z.string().default('DE,AT,CH,FR,BE,NL,LU,DK,PL,CZ'),
     MIN_SELLER_FEEDBACK_PERCENT: z.coerce.number().default(90),
@@ -35,28 +47,24 @@ function requireValue(value, name) {
     return value;
 }
 const parsed = envSchema.parse(process.env);
-const hasNotificationConfig = Boolean(parsed.EBAY_NOTIFICATION_PUBLIC_URL || parsed.EBAY_NOTIFICATION_VERIFICATION_TOKEN);
-if (hasNotificationConfig) {
-    requireValue(parsed.EBAY_NOTIFICATION_PUBLIC_URL, 'EBAY_NOTIFICATION_PUBLIC_URL');
-    requireValue(parsed.EBAY_NOTIFICATION_VERIFICATION_TOKEN, 'EBAY_NOTIFICATION_VERIFICATION_TOKEN');
-}
+const requiresEbayCredentials = parsed.EBAY_PROVIDER !== 'mock';
 export const env = {
     ...parsed,
-    EBAY_APP_ID: parsed.EBAY_PROVIDER === 'live'
+    EBAY_APP_ID: requiresEbayCredentials
         ? requireValue(parsed.EBAY_APP_ID, 'EBAY_APP_ID')
         : parsed.EBAY_APP_ID ?? '',
-    EBAY_CLIENT_SECRET: parsed.EBAY_PROVIDER === 'live'
+    EBAY_CLIENT_SECRET: requiresEbayCredentials
         ? requireValue(parsed.EBAY_CLIENT_SECRET, 'EBAY_CLIENT_SECRET')
         : parsed.EBAY_CLIENT_SECRET ?? '',
-    EBAY_NOTIFICATION_PUBLIC_URL: parsed.EBAY_NOTIFICATION_PUBLIC_URL ?? '',
-    EBAY_NOTIFICATION_VERIFICATION_TOKEN: parsed.EBAY_NOTIFICATION_VERIFICATION_TOKEN ?? '',
-    MATRIX_HOMESERVER_URL: parsed.NOTIFIER_PROVIDER === 'matrix'
-        ? requireValue(parsed.MATRIX_HOMESERVER_URL, 'MATRIX_HOMESERVER_URL')
-        : parsed.MATRIX_HOMESERVER_URL ?? '',
-    MATRIX_ACCESS_TOKEN: parsed.NOTIFIER_PROVIDER === 'matrix'
-        ? requireValue(parsed.MATRIX_ACCESS_TOKEN, 'MATRIX_ACCESS_TOKEN')
-        : parsed.MATRIX_ACCESS_TOKEN ?? '',
-    MATRIX_ROOM_ID: parsed.NOTIFIER_PROVIDER === 'matrix'
-        ? requireValue(parsed.MATRIX_ROOM_ID, 'MATRIX_ROOM_ID')
-        : parsed.MATRIX_ROOM_ID ?? '',
+    DISCORD_BOT_TOKEN: parsed.NOTIFIER_PROVIDER === 'discord'
+        ? requireValue(parsed.DISCORD_BOT_TOKEN, 'DISCORD_BOT_TOKEN')
+        : parsed.DISCORD_BOT_TOKEN ?? '',
+    DISCORD_CHANNEL_ID: parsed.NOTIFIER_PROVIDER === 'discord'
+        ? requireValue(parsed.DISCORD_CHANNEL_ID, 'DISCORD_CHANNEL_ID')
+        : parsed.DISCORD_CHANNEL_ID ?? '',
 };
+export function getEbayApiBaseUrl() {
+    return env.EBAY_PROVIDER === 'sandbox'
+        ? 'https://api.sandbox.ebay.com'
+        : 'https://api.ebay.com';
+}

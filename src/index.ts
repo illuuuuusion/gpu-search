@@ -1,34 +1,35 @@
 import { env } from './config/env.js';
 import { loadProfiles } from './core/profileLoader.js';
 import { ScannerService } from './core/scanner.js';
-import { startEbayNotificationServer } from './integrations/ebay/notificationServer.js';
-import { ConsoleNotifier, MatrixNotifier } from './integrations/matrix/notifier.js';
+import { DiscordNotifier } from './integrations/discord/notifier.js';
+import { GeizhalsReferenceService } from './integrations/geizhals/referenceService.js';
+import { ConsoleNotifier } from './integrations/notifier.js';
 import { logger } from './utils/logger.js';
 
 async function bootstrap(): Promise<void> {
-  await startEbayNotificationServer();
-
-  if (!env.SCANNER_ENABLED) {
-    logger.info({
-      ebayProvider: env.EBAY_PROVIDER,
-    }, 'Scanner disabled; webhook-only mode active');
-    return;
-  }
-
   const profiles = loadProfiles();
-  const notifier = env.NOTIFIER_PROVIDER === 'matrix'
-    ? new MatrixNotifier()
+  const notifier = env.NOTIFIER_PROVIDER === 'discord'
+    ? new DiscordNotifier()
     : new ConsoleNotifier();
 
   if ('start' in notifier && typeof notifier.start === 'function') {
     await notifier.start();
   }
 
-  const scanner = new ScannerService(notifier);
+  const marketReferences = env.MARKET_REFERENCE_PROVIDER === 'geizhals'
+    ? new GeizhalsReferenceService()
+    : undefined;
+
+  if (marketReferences) {
+    await marketReferences.start(profiles);
+  }
+
+  const scanner = new ScannerService(notifier, marketReferences);
   logger.info({
     profiles: profiles.length,
     ebayProvider: env.EBAY_PROVIDER,
     notifierProvider: env.NOTIFIER_PROVIDER,
+    marketReferenceProvider: env.MARKET_REFERENCE_PROVIDER,
   }, 'gpu-search started');
 
   await scanner.runOnce(profiles);

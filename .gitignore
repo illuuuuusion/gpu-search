@@ -1,2 +1,5 @@
 .env
 .codex
+data/
+vendor/chromium-debs/
+vendor/chromium-libs/
