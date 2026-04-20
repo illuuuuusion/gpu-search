@@ -104,6 +104,7 @@ export interface EvaluatedListing {
   profile: GpuProfile;
   listing: EbayListing;
   health: ListingHealth;
+  evaluationMode?: 'normal' | 'debug';
   accepted: boolean;
   reasons: string[];
   score: number;

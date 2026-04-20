@@ -28,6 +28,10 @@ export function formatListingMessage(result: EvaluatedListing): AlertMessage {
     { name: 'Deal-Score', value: result.score.toFixed(2), inline: true },
   ];
 
+  if (result.evaluationMode === 'debug') {
+    fields.unshift({ name: 'Modus', value: 'Debug-Preisfilter', inline: true });
+  }
+
   if (result.listing.boardBrand) {
     fields.push({ name: 'Boardpartner', value: result.listing.boardBrand, inline: true });
   }

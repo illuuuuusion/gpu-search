@@ -9,6 +9,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "refresh:references": "node dist/scripts/refreshReferences.js",
+    "reset:scanner-state": "node dist/scripts/resetScannerState.js",
     "test:mock-scan": "node dist/scripts/testMockScan.js",
     "browser:doctor": "node dist/scripts/browserDoctor.js",
     "browser:prepare-libs": "node dist/scripts/prepareChromiumHost.js",

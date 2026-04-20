@@ -10,4 +10,13 @@ export class ConsoleNotifier {
     async send(message) {
         console.log('\n--- ALERT ---\n' + renderAlertMessage(message) + '\n--------------\n');
     }
+    async sendScanStatus(message) {
+        const summary = message.summary
+            ? ` alerts=${message.summary.alertsPosted} accepted=${message.summary.acceptedListings} unique=${message.summary.uniqueListings}`
+            : '';
+        console.log(`[scan-status] trigger=${message.trigger} phase=${message.phase}${summary}`);
+    }
+    async delete() {
+        // Console alerts are ephemeral; nothing to delete.
+    }
 }

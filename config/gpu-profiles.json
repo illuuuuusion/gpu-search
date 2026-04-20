@@ -56,10 +56,11 @@
     "vramVariants": false,
     "excludeNew": true,
     "onlyGermany": false,
+    "minimumRetailDiscountPercent": 10,
     "prices": {
-      "buyNowWorking": 490,
+      "buyNowWorking": 650,
       "buyNowDefect": 154,
-      "auctionWorking": 438,
+      "auctionWorking": 580,
       "auctionDefect": 124
     }
   },
@@ -106,10 +107,10 @@
     "excludeNew": true,
     "onlyGermany": false,
     "prices": {
-      "buyNowWorking": 130,
-      "buyNowDefect": 45,
-      "auctionWorking": 115,
-      "auctionDefect": 35
+      "buyNowWorking": 180,
+      "buyNowDefect": 110,
+      "auctionWorking": 160,
+      "auctionDefect": 85
     }
   },
   {
@@ -122,10 +123,10 @@
     "excludeNew": true,
     "onlyGermany": false,
     "prices": {
-      "buyNowWorking": 150,
-      "buyNowDefect": 50,
-      "auctionWorking": 135,
-      "auctionDefect": 40
+      "buyNowWorking": 210,
+      "buyNowDefect": 130,
+      "auctionWorking": 185,
+      "auctionDefect": 100
     }
   },
   {
@@ -138,10 +139,10 @@
     "excludeNew": true,
     "onlyGermany": false,
     "prices": {
-      "buyNowWorking": 200,
-      "buyNowDefect": 65,
-      "auctionWorking": 180,
-      "auctionDefect": 50
+      "buyNowWorking": 290,
+      "buyNowDefect": 170,
+      "auctionWorking": 255,
+      "auctionDefect": 130
     }
   },
   {
@@ -203,9 +204,9 @@
     "onlyGermany": false,
     "prices": {
       "buyNowWorking": 220,
-      "buyNowDefect": 70,
+      "buyNowDefect": 160,
       "auctionWorking": 195,
-      "auctionDefect": 55
+      "auctionDefect": 120
     }
   },
   {
@@ -265,11 +266,11 @@
     "vramVariants": false,
     "excludeNew": true,
     "onlyGermany": false,
-    "minimumRetailDiscountPercent": 15,
+    "minimumRetailDiscountPercent": 10,
     "prices": {
-      "buyNowWorking": 220,
+      "buyNowWorking": 245,
       "buyNowDefect": 70,
-      "auctionWorking": 195,
+      "auctionWorking": 220,
       "auctionDefect": 55
     }
   },
@@ -282,11 +283,11 @@
     "vramVariants": true,
     "excludeNew": true,
     "onlyGermany": false,
-    "minimumRetailDiscountPercent": 15,
+    "minimumRetailDiscountPercent": 10,
     "prices": {
-      "buyNowWorking": 260,
+      "buyNowWorking": 300,
       "buyNowDefect": 80,
-      "auctionWorking": 230,
+      "auctionWorking": 270,
       "auctionDefect": 65
     }
   },
@@ -299,11 +300,11 @@
     "vramVariants": true,
     "excludeNew": true,
     "onlyGermany": false,
-    "minimumRetailDiscountPercent": 15,
+    "minimumRetailDiscountPercent": 10,
     "prices": {
-      "buyNowWorking": 320,
+      "buyNowWorking": 360,
       "buyNowDefect": 100,
-      "auctionWorking": 285,
+      "auctionWorking": 320,
       "auctionDefect": 80
     }
   },
@@ -316,11 +317,11 @@
     "vramVariants": false,
     "excludeNew": true,
     "onlyGermany": false,
-    "minimumRetailDiscountPercent": 15,
+    "minimumRetailDiscountPercent": 10,
     "prices": {
-      "buyNowWorking": 360,
+      "buyNowWorking": 430,
       "buyNowDefect": 115,
-      "auctionWorking": 320,
+      "auctionWorking": 385,
       "auctionDefect": 90
     }
   },
@@ -333,11 +334,11 @@
     "vramVariants": false,
     "excludeNew": true,
     "onlyGermany": false,
-    "minimumRetailDiscountPercent": 15,
+    "minimumRetailDiscountPercent": 10,
     "prices": {
-      "buyNowWorking": 390,
+      "buyNowWorking": 470,
       "buyNowDefect": 125,
-      "auctionWorking": 350,
+      "auctionWorking": 420,
       "auctionDefect": 100
     }
   },
@@ -350,11 +351,11 @@
     "vramVariants": false,
     "excludeNew": true,
     "onlyGermany": false,
-    "minimumRetailDiscountPercent": 15,
+    "minimumRetailDiscountPercent": 10,
     "prices": {
-      "buyNowWorking": 420,
+      "buyNowWorking": 520,
       "buyNowDefect": 130,
-      "auctionWorking": 375,
+      "auctionWorking": 465,
       "auctionDefect": 105
     }
   },
@@ -367,11 +368,11 @@
     "vramVariants": false,
     "excludeNew": true,
     "onlyGermany": false,
-    "minimumRetailDiscountPercent": 15,
+    "minimumRetailDiscountPercent": 10,
     "prices": {
-      "buyNowWorking": 500,
+      "buyNowWorking": 620,
       "buyNowDefect": 155,
-      "auctionWorking": 445,
+      "auctionWorking": 555,
       "auctionDefect": 125
     }
   },
@@ -384,11 +385,11 @@
     "vramVariants": false,
     "excludeNew": true,
     "onlyGermany": false,
-    "minimumRetailDiscountPercent": 15,
+    "minimumRetailDiscountPercent": 10,
     "prices": {
-      "buyNowWorking": 620,
+      "buyNowWorking": 760,
       "buyNowDefect": 190,
-      "auctionWorking": 555,
+      "auctionWorking": 680,
       "auctionDefect": 155
     }
   },
@@ -401,11 +402,11 @@
     "vramVariants": false,
     "excludeNew": true,
     "onlyGermany": false,
-    "minimumRetailDiscountPercent": 15,
+    "minimumRetailDiscountPercent": 10,
     "prices": {
-      "buyNowWorking": 680,
+      "buyNowWorking": 820,
       "buyNowDefect": 210,
-      "auctionWorking": 610,
+      "auctionWorking": 735,
       "auctionDefect": 170
     }
   },
@@ -418,11 +419,11 @@
     "vramVariants": false,
     "excludeNew": true,
     "onlyGermany": false,
-    "minimumRetailDiscountPercent": 15,
+    "minimumRetailDiscountPercent": 10,
     "prices": {
-      "buyNowWorking": 1050,
+      "buyNowWorking": 1250,
       "buyNowDefect": 320,
-      "auctionWorking": 940,
+      "auctionWorking": 1125,
       "auctionDefect": 260
     }
   },
@@ -435,11 +436,11 @@
     "vramVariants": false,
     "excludeNew": true,
     "onlyGermany": false,
-    "minimumRetailDiscountPercent": 15,
+    "minimumRetailDiscountPercent": 10,
     "prices": {
-      "buyNowWorking": 250,
+      "buyNowWorking": 270,
       "buyNowDefect": 90,
-      "auctionWorking": 225,
+      "auctionWorking": 245,
       "auctionDefect": 70
     }
   },
@@ -452,11 +453,11 @@
     "vramVariants": true,
     "excludeNew": true,
     "onlyGermany": false,
-    "minimumRetailDiscountPercent": 15,
+    "minimumRetailDiscountPercent": 10,
     "prices": {
-      "buyNowWorking": 315,
+      "buyNowWorking": 345,
       "buyNowDefect": 105,
-      "auctionWorking": 285,
+      "auctionWorking": 310,
       "auctionDefect": 85
     }
   },
@@ -469,11 +470,11 @@
     "vramVariants": true,
     "excludeNew": true,
     "onlyGermany": false,
-    "minimumRetailDiscountPercent": 15,
+    "minimumRetailDiscountPercent": 10,
     "prices": {
-      "buyNowWorking": 320,
+      "buyNowWorking": 390,
       "buyNowDefect": 110,
-      "auctionWorking": 290,
+      "auctionWorking": 350,
       "auctionDefect": 105
     }
   },
@@ -486,11 +487,11 @@
     "vramVariants": false,
     "excludeNew": true,
     "onlyGermany": false,
-    "minimumRetailDiscountPercent": 15,
+    "minimumRetailDiscountPercent": 10,
     "prices": {
-      "buyNowWorking": 500,
+      "buyNowWorking": 535,
       "buyNowDefect": 165,
-      "auctionWorking": 450,
+      "auctionWorking": 485,
       "auctionDefect": 135
     }
   },
@@ -503,7 +504,7 @@
     "vramVariants": false,
     "excludeNew": true,
     "onlyGermany": false,
-    "minimumRetailDiscountPercent": 15,
+    "minimumRetailDiscountPercent": 10,
     "prices": {
       "buyNowWorking": 680,
       "buyNowDefect": 210,
@@ -520,11 +521,11 @@
     "vramVariants": false,
     "excludeNew": true,
     "onlyGermany": false,
-    "minimumRetailDiscountPercent": 15,
+    "minimumRetailDiscountPercent": 10,
     "prices": {
-      "buyNowWorking": 900,
+      "buyNowWorking": 980,
       "buyNowDefect": 275,
-      "auctionWorking": 805,
+      "auctionWorking": 880,
       "auctionDefect": 220
     }
   },
@@ -537,7 +538,7 @@
     "vramVariants": false,
     "excludeNew": true,
     "onlyGermany": false,
-    "minimumRetailDiscountPercent": 15,
+    "minimumRetailDiscountPercent": 10,
     "prices": {
       "buyNowWorking": 1750,
       "buyNowDefect": 530,
@@ -572,9 +573,9 @@
     "onlyGermany": false,
     "prices": {
       "buyNowWorking": 200,
-      "buyNowDefect": 64,
+      "buyNowDefect": 210,
       "auctionWorking": 178,
-      "auctionDefect": 50
+      "auctionDefect": 160
     }
   },
   {
@@ -602,12 +603,12 @@
     "vramVariants": false,
     "excludeNew": true,
     "onlyGermany": false,
-    "minimumRetailDiscountPercent": 15,
+    "minimumRetailDiscountPercent": 10,
     "prices": {
-      "buyNowWorking": 230,
-      "buyNowDefect": 73,
-      "auctionWorking": 205,
-      "auctionDefect": 58
+      "buyNowWorking": 290,
+      "buyNowDefect": 160,
+      "auctionWorking": 260,
+      "auctionDefect": 120
     }
   },
   {
@@ -619,12 +620,12 @@
     "vramVariants": false,
     "excludeNew": true,
     "onlyGermany": false,
-    "minimumRetailDiscountPercent": 15,
+    "minimumRetailDiscountPercent": 10,
     "prices": {
-      "buyNowWorking": 290,
-      "buyNowDefect": 92,
-      "auctionWorking": 260,
-      "auctionDefect": 73
+      "buyNowWorking": 380,
+      "buyNowDefect": 220,
+      "auctionWorking": 340,
+      "auctionDefect": 170
     }
   },
   {
@@ -636,11 +637,11 @@
     "vramVariants": false,
     "excludeNew": true,
     "onlyGermany": false,
-    "minimumRetailDiscountPercent": 15,
+    "minimumRetailDiscountPercent": 10,
     "prices": {
-      "buyNowWorking": 330,
+      "buyNowWorking": 430,
       "buyNowDefect": 104,
-      "auctionWorking": 295,
+      "auctionWorking": 385,
       "auctionDefect": 83
     }
   },
@@ -653,12 +654,12 @@
     "vramVariants": false,
     "excludeNew": true,
     "onlyGermany": false,
-    "minimumRetailDiscountPercent": 15,
+    "minimumRetailDiscountPercent": 10,
     "prices": {
-      "buyNowWorking": 400,
-      "buyNowDefect": 126,
-      "auctionWorking": 358,
-      "auctionDefect": 101
+      "buyNowWorking": 520,
+      "buyNowDefect": 280,
+      "auctionWorking": 465,
+      "auctionDefect": 210
     }
   },
   {
@@ -670,11 +671,11 @@
     "vramVariants": false,
     "excludeNew": true,
     "onlyGermany": false,
-    "minimumRetailDiscountPercent": 15,
+    "minimumRetailDiscountPercent": 10,
     "prices": {
-      "buyNowWorking": 475,
+      "buyNowWorking": 510,
       "buyNowDefect": 160,
-      "auctionWorking": 425,
+      "auctionWorking": 460,
       "auctionDefect": 130
     }
   },
@@ -687,11 +688,11 @@
     "vramVariants": false,
     "excludeNew": true,
     "onlyGermany": false,
-    "minimumRetailDiscountPercent": 15,
+    "minimumRetailDiscountPercent": 10,
     "prices": {
-      "buyNowWorking": 540,
+      "buyNowWorking": 590,
       "buyNowDefect": 178,
-      "auctionWorking": 485,
+      "auctionWorking": 530,
       "auctionDefect": 143
     }
   }

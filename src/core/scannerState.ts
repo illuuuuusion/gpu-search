@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { env } from '../config/env.js';
 import type { EvaluatedListing, OfferType, ProfileMarketStats } from '../types/domain.js';
+import type { NotificationReceipt } from '../integrations/notifier.js';
 import { logger } from '../utils/logger.js';
 
 const DEFAULT_STATE_PATH = path.resolve(process.cwd(), 'data/scanner-state.json');
@@ -14,6 +15,9 @@ interface SeenRecord {
   listingId: string;
   profileName: string;
   sentAt: string;
+  notificationMessageId?: string;
+  notificationChannelId?: string;
+  lastAvailabilityCheckAt?: string;
 }
 
 interface ObservationRecord {
@@ -27,10 +31,15 @@ interface ObservationRecord {
 }
 
 interface ScannerStateFile {
-  version: 1;
+  version: 2;
   updatedAt: string;
   seen: SeenRecord[];
   observations: ObservationRecord[];
+}
+
+export interface ScannerStateResetResult {
+  seenCount: number;
+  observationCount: number;
 }
 
 function cutoffTimestamp(days: number, now = Date.now()): number {
@@ -96,12 +105,31 @@ export class ScannerStateStore {
     ]);
   }
 
-  async recordSent(result: EvaluatedListing): Promise<void> {
+  getListingsDueForAvailabilityCheck(referenceTime = Date.now()): SeenRecord[] {
+    const cutoff = cutoffTimestamp(env.SCANNER_AVAILABILITY_RECHECK_HOURS / 24, referenceTime);
+
+    return Array.from(this.seen.values())
+      .filter(record => {
+        const lastCheck = record.lastAvailabilityCheckAt ?? record.sentAt;
+        return new Date(lastCheck).getTime() <= cutoff;
+      })
+      .sort((left, right) => {
+        const leftTime = left.lastAvailabilityCheckAt ?? left.sentAt;
+        const rightTime = right.lastAvailabilityCheckAt ?? right.sentAt;
+        return leftTime.localeCompare(rightTime);
+      })
+      .slice(0, env.SCANNER_AVAILABILITY_CHECK_BATCH_SIZE);
+  }
+
+  async recordSent(result: EvaluatedListing, receipt?: NotificationReceipt): Promise<void> {
     const sentAt = new Date().toISOString();
     this.seen.set(result.listing.id, {
       listingId: result.listing.id,
       profileName: result.profile.name,
       sentAt,
+      notificationMessageId: receipt?.messageId,
+      notificationChannelId: receipt?.channelId,
+      lastAvailabilityCheckAt: sentAt,
     });
     this.observations = [
       ...this.observations.filter(observation => observation.listingId !== result.listing.id),
@@ -128,6 +156,54 @@ export class ScannerStateStore {
       await this.persist();
     } catch (error) {
       logger.warn({ error, listingId: result.listing.id }, 'Failed to persist scanner observation');
+    }
+  }
+
+  async recordAvailabilityCheck(listingId: string, checkedAt: string): Promise<void> {
+    const existing = this.seen.get(listingId);
+    if (!existing) {
+      return;
+    }
+
+    this.seen.set(listingId, {
+      ...existing,
+      lastAvailabilityCheckAt: checkedAt,
+    });
+
+    try {
+      await this.persist();
+    } catch (error) {
+      logger.warn({ error, listingId }, 'Failed to persist scanner availability check');
+    }
+  }
+
+  async reset(): Promise<ScannerStateResetResult> {
+    const result = {
+      seenCount: this.seen.size,
+      observationCount: this.observations.length,
+    };
+
+    this.seen.clear();
+    this.observations = [];
+
+    try {
+      await this.persist();
+    } catch (error) {
+      logger.warn({ error }, 'Failed to persist scanner state reset');
+    }
+
+    return result;
+  }
+
+  async forgetSeen(listingId: string): Promise<void> {
+    if (!this.seen.delete(listingId)) {
+      return;
+    }
+
+    try {
+      await this.persist();
+    } catch (error) {
+      logger.warn({ error, listingId }, 'Failed to persist scanner seen removal');
     }
   }
 
@@ -198,7 +274,7 @@ export class ScannerStateStore {
     const statePath = getStatePath();
     await fs.mkdir(path.dirname(statePath), { recursive: true });
     await fs.writeFile(statePath, JSON.stringify({
-      version: 1,
+      version: 2,
       updatedAt: new Date().toISOString(),
       seen: Array.from(this.seen.values()).sort((left, right) => left.sentAt.localeCompare(right.sentAt)),
       observations: this.observations.sort((left, right) => left.observedAt.localeCompare(right.observedAt)),

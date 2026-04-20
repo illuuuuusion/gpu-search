@@ -1,8 +1,9 @@
+import { setImmediate as yieldToEventLoop } from 'node:timers/promises';
 import { evaluateListing } from './filterEngine.js';
 import { formatListingMessage } from './messageFormatter.js';
 import { selectProfileForListing } from './profileMatcher.js';
 import { searchBuckets } from '../config/searchBuckets.js';
-import { searchBucketListingsPage } from '../integrations/ebay/client.js';
+import { checkListingAvailability, searchBucketListingsPage } from '../integrations/ebay/client.js';
 import { logger } from '../utils/logger.js';
 import { env } from '../config/env.js';
 import { ScannerStateStore } from './scannerState.js';
@@ -11,6 +12,7 @@ function isNewerThanCutoff(listing, cutoff) {
         return true;
     return listing.itemOriginDate > cutoff;
 }
+const EVENT_LOOP_YIELD_INTERVAL = 50;
 export class ScannerService {
     notifier;
     marketReferences;
@@ -18,6 +20,7 @@ export class ScannerService {
     bucketWatermarks = new Map();
     state = new ScannerStateStore();
     initializationPromise = null;
+    currentRunPromise = null;
     constructor(notifier, marketReferences) {
         this.notifier = notifier;
         this.marketReferences = marketReferences;
@@ -28,22 +31,83 @@ export class ScannerService {
         }
         await this.initializationPromise;
     }
-    async runOnce(profiles) {
+    async cleanupUnavailableListings() {
+        const dueListings = this.state.getListingsDueForAvailabilityCheck();
+        let removalCount = 0;
+        for (const record of dueListings) {
+            try {
+                const availability = await checkListingAvailability(record.listingId);
+                if (availability.available) {
+                    await this.state.recordAvailabilityCheck(record.listingId, availability.checkedAt);
+                    continue;
+                }
+                if (this.notifier.delete) {
+                    await this.notifier.delete({
+                        messageId: record.notificationMessageId,
+                        channelId: record.notificationChannelId,
+                    });
+                }
+                await this.state.forgetSeen(record.listingId);
+                removalCount += 1;
+                logger.info({
+                    listingId: record.listingId,
+                    profile: record.profileName,
+                    reason: availability.reason,
+                }, 'Removed unavailable listing notification');
+            }
+            catch (error) {
+                logger.warn({
+                    error,
+                    listingId: record.listingId,
+                    profile: record.profileName,
+                }, 'Failed to verify sent listing availability');
+            }
+        }
+        return removalCount;
+    }
+    async resetState() {
+        await this.ensureInitialized();
+        if (this.currentRunPromise) {
+            await this.currentRunPromise;
+        }
+        this.bucketWatermarks.clear();
+        return this.state.reset();
+    }
+    async runOnce(profiles, options = {}) {
         if (this.isRunning) {
             logger.warn('Skipping scan because previous run is still active');
-            return;
+            return {
+                uniqueListings: 0,
+                acceptedListings: 0,
+                seenSkipped: 0,
+                alertsPosted: 0,
+                notificationFailures: 0,
+                availabilityRemovals: 0,
+            };
         }
         this.isRunning = true;
-        try {
+        const runPromise = (async () => {
             await this.ensureInitialized();
             const collectedListings = new Map();
+            let acceptedListings = 0;
+            let seenSkipped = 0;
+            let alertsPosted = 0;
+            let notificationFailures = 0;
+            let scannedListingCount = 0;
+            const evaluationMode = options.evaluationMode ?? 'normal';
+            const persistState = options.persistState ?? true;
+            const runAvailabilityCleanup = options.runAvailabilityCleanup ?? true;
             for (const bucket of searchBuckets) {
-                const previousWatermark = this.bucketWatermarks.get(bucket.id);
+                const previousWatermark = options.ignoreBucketWatermarks
+                    ? undefined
+                    : this.bucketWatermarks.get(bucket.id);
                 const nextWatermark = new Date().toISOString();
                 logger.info({
                     bucket: bucket.name,
                     query: bucket.query,
                     previousWatermark,
+                    ignoreSeen: options.ignoreSeen ?? false,
+                    ignoreBucketWatermarks: options.ignoreBucketWatermarks ?? false,
                 }, 'Scanning bucket');
                 try {
                     let offset = 0;
@@ -56,6 +120,10 @@ export class ScannerService {
                         hasNext = page.hasNext;
                         let reachedKnownWindow = false;
                         for (const listing of page.listings) {
+                            scannedListingCount += 1;
+                            if (scannedListingCount % EVENT_LOOP_YIELD_INTERVAL === 0) {
+                                await yieldToEventLoop();
+                            }
                             if (!isNewerThanCutoff(listing, previousWatermark)) {
                                 reachedKnownWindow = true;
                                 break;
@@ -82,26 +150,43 @@ export class ScannerService {
                     logger.error({ error, bucket: bucket.name }, 'failed to scan bucket');
                 }
             }
+            let evaluatedListingCount = 0;
             for (const listing of collectedListings.values()) {
+                evaluatedListingCount += 1;
+                if (evaluatedListingCount % EVENT_LOOP_YIELD_INTERVAL === 0) {
+                    await yieldToEventLoop();
+                }
                 const match = selectProfileForListing(profiles, listing);
                 if (!match)
                     continue;
                 const referenceMatch = this.marketReferences?.matchReference(match.profile, listing);
-                const result = evaluateListing(match.profile, listing, referenceMatch);
+                const result = evaluateListing(match.profile, listing, referenceMatch, { evaluationMode });
                 if (!result.accepted)
                     continue;
-                if (this.state.hasSeen(listing.id))
+                acceptedListings += 1;
+                if (!options.ignoreSeen && this.state.hasSeen(listing.id)) {
+                    seenSkipped += 1;
                     continue;
+                }
+                if (options.maxAlerts && alertsPosted >= options.maxAlerts) {
+                    continue;
+                }
                 const resultWithStats = {
                     ...result,
                     marketStats: this.state.previewStats(result),
                 };
-                await this.state.recordObservation(resultWithStats);
+                if (persistState) {
+                    await this.state.recordObservation(resultWithStats);
+                }
                 try {
-                    await this.notifier.send(formatListingMessage(resultWithStats));
-                    await this.state.recordSent(resultWithStats);
+                    const receipt = (await this.notifier.send(formatListingMessage(resultWithStats))) ?? undefined;
+                    if (persistState) {
+                        await this.state.recordSent(resultWithStats, receipt);
+                    }
+                    alertsPosted += 1;
                 }
                 catch (error) {
+                    notificationFailures += 1;
                     logger.error({
                         error,
                         listingId: listing.id,
@@ -110,8 +195,24 @@ export class ScannerService {
                     }, 'failed to send notification');
                 }
             }
+            const availabilityRemovals = runAvailabilityCleanup
+                ? await this.cleanupUnavailableListings()
+                : 0;
+            return {
+                uniqueListings: collectedListings.size,
+                acceptedListings,
+                seenSkipped,
+                alertsPosted,
+                notificationFailures,
+                availabilityRemovals,
+            };
+        })();
+        this.currentRunPromise = runPromise;
+        try {
+            return await runPromise;
         }
         finally {
+            this.currentRunPromise = null;
             this.isRunning = false;
         }
     }

@@ -45,6 +45,8 @@ const envSchema = z.object({
   SCANNER_STATE_PATH: optionalString,
   SCANNER_SEEN_RETENTION_DAYS: z.coerce.number().default(30),
   SCANNER_STATS_WINDOW_DAYS: z.coerce.number().default(90),
+  SCANNER_AVAILABILITY_RECHECK_HOURS: z.coerce.number().default(6),
+  SCANNER_AVAILABILITY_CHECK_BATCH_SIZE: z.coerce.number().default(25),
   POLL_INTERVAL_SECONDS: z.coerce.number().default(300),
   ALLOW_COUNTRIES: z.string().default('DE,AT,CH,FR,BE,NL,LU,DK,PL,CZ'),
   MIN_SELLER_FEEDBACK_PERCENT: z.coerce.number().default(90),
@@ -85,6 +87,8 @@ interface AppEnv {
   SCANNER_STATE_PATH?: string;
   SCANNER_SEEN_RETENTION_DAYS: number;
   SCANNER_STATS_WINDOW_DAYS: number;
+  SCANNER_AVAILABILITY_RECHECK_HOURS: number;
+  SCANNER_AVAILABILITY_CHECK_BATCH_SIZE: number;
   POLL_INTERVAL_SECONDS: number;
   ALLOW_COUNTRIES: string;
   MIN_SELLER_FEEDBACK_PERCENT: number;

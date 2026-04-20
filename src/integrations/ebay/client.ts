@@ -13,6 +13,18 @@ interface EbaySearchResponse {
   offset?: number;
 }
 
+interface EbayItemResponse {
+  itemId?: string;
+  itemEndDate?: string;
+  estimatedAvailabilities?: Array<Record<string, unknown>>;
+}
+
+export interface ListingAvailability {
+  available: boolean;
+  checkedAt: string;
+  reason: string;
+}
+
 function toNumber(value: unknown): number {
   const parsed = Number(value ?? 0);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -190,6 +202,72 @@ function mapListing(item: Record<string, unknown>): EbayListing {
 
 function buildFilter(): string {
   return 'buyingOptions:{FIXED_PRICE|AUCTION}';
+}
+
+function parseAvailabilityStatuses(item: EbayItemResponse): string[] {
+  return (item.estimatedAvailabilities ?? [])
+    .map(entry => typeof entry.estimatedAvailabilityStatus === 'string'
+      ? entry.estimatedAvailabilityStatus
+      : undefined)
+    .filter((value): value is string => Boolean(value));
+}
+
+export async function checkListingAvailability(itemId: string): Promise<ListingAvailability> {
+  const checkedAt = new Date().toISOString();
+
+  if (env.EBAY_PROVIDER === 'mock') {
+    const unavailable = /(?:ended|expired|deleted|unavailable)/i.test(itemId);
+    return {
+      available: !unavailable,
+      checkedAt,
+      reason: unavailable ? 'mock_unavailable' : 'mock_available',
+    };
+  }
+
+  const token = await getEbayAccessToken();
+
+  try {
+    const response = await axios.get<EbayItemResponse>(`${getEbayApiBaseUrl()}/buy/browse/v1/item/${encodeURIComponent(itemId)}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'X-EBAY-C-MARKETPLACE-ID': env.EBAY_MARKETPLACE_ID,
+      },
+    });
+
+    const itemEndDate = response.data.itemEndDate;
+    if (itemEndDate && new Date(itemEndDate).getTime() <= Date.now()) {
+      return {
+        available: false,
+        checkedAt,
+        reason: 'item_ended',
+      };
+    }
+
+    const availabilityStatuses = parseAvailabilityStatuses(response.data);
+    if (availabilityStatuses.length > 0 && availabilityStatuses.every(status => status === 'OUT_OF_STOCK')) {
+      return {
+        available: false,
+        checkedAt,
+        reason: 'out_of_stock',
+      };
+    }
+
+    return {
+      available: true,
+      checkedAt,
+      reason: availabilityStatuses[0]?.toLowerCase() ?? 'available',
+    };
+  } catch (error) {
+    if (axios.isAxiosError(error) && [404, 410].includes(error.response?.status ?? 0)) {
+      return {
+        available: false,
+        checkedAt,
+        reason: `http_${error.response?.status}`,
+      };
+    }
+
+    throw error;
+  }
 }
 
 export async function searchBucketListingsPage(

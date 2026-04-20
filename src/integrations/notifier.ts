@@ -13,9 +13,32 @@ export interface AlertMessage {
   fields: AlertField[];
 }
 
+export interface NotificationReceipt {
+  messageId?: string;
+  channelId?: string;
+}
+
+export interface ScanStatusSummary {
+  uniqueListings: number;
+  acceptedListings: number;
+  seenSkipped: number;
+  alertsPosted: number;
+  notificationFailures: number;
+  availabilityRemovals: number;
+}
+
+export interface ScanStatusMessage {
+  phase: 'started' | 'finished';
+  trigger: 'automatic' | 'manual' | 'force' | 'debug' | 'startup';
+  nextAutomaticScanAt?: string;
+  summary?: ScanStatusSummary;
+}
+
 export interface Notifier {
   start?(): Promise<void>;
-  send(message: AlertMessage): Promise<void>;
+  send(message: AlertMessage): Promise<NotificationReceipt | void>;
+  sendScanStatus?(message: ScanStatusMessage): Promise<void>;
+  delete?(receipt: NotificationReceipt): Promise<void>;
 }
 
 export function renderAlertMessage(message: AlertMessage): string {
@@ -30,5 +53,16 @@ export function renderAlertMessage(message: AlertMessage): string {
 export class ConsoleNotifier implements Notifier {
   async send(message: AlertMessage): Promise<void> {
     console.log('\n--- ALERT ---\n' + renderAlertMessage(message) + '\n--------------\n');
+  }
+
+  async sendScanStatus(message: ScanStatusMessage): Promise<void> {
+    const summary = message.summary
+      ? ` alerts=${message.summary.alertsPosted} accepted=${message.summary.acceptedListings} unique=${message.summary.uniqueListings}`
+      : '';
+    console.log(`[scan-status] trigger=${message.trigger} phase=${message.phase}${summary}`);
+  }
+
+  async delete(): Promise<void> {
+    // Console alerts are ephemeral; nothing to delete.
   }
 }

@@ -57,12 +57,29 @@ export class ScannerStateStore {
             previewObservation,
         ]);
     }
-    async recordSent(result) {
+    getListingsDueForAvailabilityCheck(referenceTime = Date.now()) {
+        const cutoff = cutoffTimestamp(env.SCANNER_AVAILABILITY_RECHECK_HOURS / 24, referenceTime);
+        return Array.from(this.seen.values())
+            .filter(record => {
+            const lastCheck = record.lastAvailabilityCheckAt ?? record.sentAt;
+            return new Date(lastCheck).getTime() <= cutoff;
+        })
+            .sort((left, right) => {
+            const leftTime = left.lastAvailabilityCheckAt ?? left.sentAt;
+            const rightTime = right.lastAvailabilityCheckAt ?? right.sentAt;
+            return leftTime.localeCompare(rightTime);
+        })
+            .slice(0, env.SCANNER_AVAILABILITY_CHECK_BATCH_SIZE);
+    }
+    async recordSent(result, receipt) {
         const sentAt = new Date().toISOString();
         this.seen.set(result.listing.id, {
             listingId: result.listing.id,
             profileName: result.profile.name,
             sentAt,
+            notificationMessageId: receipt?.messageId,
+            notificationChannelId: receipt?.channelId,
+            lastAvailabilityCheckAt: sentAt,
         });
         this.observations = [
             ...this.observations.filter(observation => observation.listingId !== result.listing.id),
@@ -88,6 +105,48 @@ export class ScannerStateStore {
         }
         catch (error) {
             logger.warn({ error, listingId: result.listing.id }, 'Failed to persist scanner observation');
+        }
+    }
+    async recordAvailabilityCheck(listingId, checkedAt) {
+        const existing = this.seen.get(listingId);
+        if (!existing) {
+            return;
+        }
+        this.seen.set(listingId, {
+            ...existing,
+            lastAvailabilityCheckAt: checkedAt,
+        });
+        try {
+            await this.persist();
+        }
+        catch (error) {
+            logger.warn({ error, listingId }, 'Failed to persist scanner availability check');
+        }
+    }
+    async reset() {
+        const result = {
+            seenCount: this.seen.size,
+            observationCount: this.observations.length,
+        };
+        this.seen.clear();
+        this.observations = [];
+        try {
+            await this.persist();
+        }
+        catch (error) {
+            logger.warn({ error }, 'Failed to persist scanner state reset');
+        }
+        return result;
+    }
+    async forgetSeen(listingId) {
+        if (!this.seen.delete(listingId)) {
+            return;
+        }
+        try {
+            await this.persist();
+        }
+        catch (error) {
+            logger.warn({ error, listingId }, 'Failed to persist scanner seen removal');
         }
     }
     async loadInternal() {
@@ -145,7 +204,7 @@ export class ScannerStateStore {
         const statePath = getStatePath();
         await fs.mkdir(path.dirname(statePath), { recursive: true });
         await fs.writeFile(statePath, JSON.stringify({
-            version: 1,
+            version: 2,
             updatedAt: new Date().toISOString(),
             seen: Array.from(this.seen.values()).sort((left, right) => left.sentAt.localeCompare(right.sentAt)),
             observations: this.observations.sort((left, right) => left.observedAt.localeCompare(right.observedAt)),
