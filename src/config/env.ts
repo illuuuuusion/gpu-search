@@ -47,10 +47,23 @@ const envSchema = z.object({
   SCANNER_STATS_WINDOW_DAYS: z.coerce.number().default(90),
   SCANNER_AVAILABILITY_RECHECK_HOURS: z.coerce.number().default(6),
   SCANNER_AVAILABILITY_CHECK_BATCH_SIZE: z.coerce.number().default(25),
-  POLL_INTERVAL_SECONDS: z.coerce.number().default(300),
+  POLL_INTERVAL_SECONDS: z.coerce.number().default(720),
   ALLOW_COUNTRIES: z.string().default('DE,AT,CH,FR,BE,NL,LU,DK,PL,CZ'),
   MIN_SELLER_FEEDBACK_PERCENT: z.coerce.number().default(90),
   MAX_SHIPPING_HARD_CAP_EUR: z.coerce.number().default(25),
+  VALORANT_ENABLED: booleanFromString.default(false),
+  VALORANT_PROVIDER: z.enum(['vlr', 'grid']).default('vlr'),
+  VALORANT_STORAGE_PATH: z.string().default('data/valorant-compositions.json'),
+  VALORANT_WINDOW_DAYS: z.coerce.number().default(90),
+  VALORANT_INGEST_HOUR_UTC: z.coerce.number().min(0).max(23).default(1),
+  VALORANT_RAW_RETENTION_DAYS: z.coerce.number().default(7),
+  VALORANT_BUILDER_SESSION_TTL_MINUTES: z.coerce.number().default(30),
+  VALORANT_VLR_BASE_URL: z.string().default('https://www.vlr.gg'),
+  VALORANT_VLR_MIN_REQUEST_INTERVAL_MS: z.coerce.number().default(1250),
+  VALORANT_VLR_MAX_EVENT_PAGES: z.coerce.number().min(1).max(10).default(3),
+  VALORANT_LIQUIPEDIA_API_BASE_URL: z.string().default('https://liquipedia.net/valorant/api.php'),
+  VALORANT_LIQUIPEDIA_USER_AGENT: z.string().default('gpu-search/0.1 (contact: you@example.com)'),
+  VALORANT_LIQUIPEDIA_MIN_REQUEST_INTERVAL_MS: z.coerce.number().default(3500),
 });
 
 function requireValue(value: string | undefined, name: string): string {
@@ -93,6 +106,19 @@ interface AppEnv {
   ALLOW_COUNTRIES: string;
   MIN_SELLER_FEEDBACK_PERCENT: number;
   MAX_SHIPPING_HARD_CAP_EUR: number;
+  VALORANT_ENABLED: boolean;
+  VALORANT_PROVIDER: 'vlr' | 'grid';
+  VALORANT_STORAGE_PATH: string;
+  VALORANT_WINDOW_DAYS: number;
+  VALORANT_INGEST_HOUR_UTC: number;
+  VALORANT_RAW_RETENTION_DAYS: number;
+  VALORANT_BUILDER_SESSION_TTL_MINUTES: number;
+  VALORANT_VLR_BASE_URL: string;
+  VALORANT_VLR_MIN_REQUEST_INTERVAL_MS: number;
+  VALORANT_VLR_MAX_EVENT_PAGES: number;
+  VALORANT_LIQUIPEDIA_API_BASE_URL: string;
+  VALORANT_LIQUIPEDIA_USER_AGENT: string;
+  VALORANT_LIQUIPEDIA_MIN_REQUEST_INTERVAL_MS: number;
 }
 
 const parsed = envSchema.parse(process.env);

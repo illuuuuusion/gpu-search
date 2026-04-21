@@ -1,0 +1,32 @@
+import type { StaticAgentDefinition } from '../domain/models.js';
+
+export const VALORANT_AGENTS: readonly StaticAgentDefinition[] = [
+  { key: 'astra', displayName: 'Astra', role: 'Controller', aliases: ['astra'] },
+  { key: 'breach', displayName: 'Breach', role: 'Initiator', aliases: ['breach'] },
+  { key: 'brimstone', displayName: 'Brimstone', role: 'Controller', aliases: ['brimstone', 'brim'] },
+  { key: 'chamber', displayName: 'Chamber', role: 'Sentinel', aliases: ['chamber'] },
+  { key: 'clove', displayName: 'Clove', role: 'Controller', aliases: ['clove'] },
+  { key: 'cypher', displayName: 'Cypher', role: 'Sentinel', aliases: ['cypher'] },
+  { key: 'deadlock', displayName: 'Deadlock', role: 'Sentinel', aliases: ['deadlock'] },
+  { key: 'fade', displayName: 'Fade', role: 'Initiator', aliases: ['fade'] },
+  { key: 'gekko', displayName: 'Gekko', role: 'Initiator', aliases: ['gekko'] },
+  { key: 'harbor', displayName: 'Harbor', role: 'Controller', aliases: ['harbor'] },
+  { key: 'iso', displayName: 'Iso', role: 'Duelist', aliases: ['iso'] },
+  { key: 'jett', displayName: 'Jett', role: 'Duelist', aliases: ['jett'] },
+  { key: 'kayo', displayName: 'KAY/O', role: 'Initiator', aliases: ['kayo', 'kay/o'] },
+  { key: 'killjoy', displayName: 'Killjoy', role: 'Sentinel', aliases: ['killjoy', 'kj'] },
+  { key: 'neon', displayName: 'Neon', role: 'Duelist', aliases: ['neon'] },
+  { key: 'omen', displayName: 'Omen', role: 'Controller', aliases: ['omen'] },
+  { key: 'phoenix', displayName: 'Phoenix', role: 'Duelist', aliases: ['phoenix'] },
+  { key: 'raze', displayName: 'Raze', role: 'Duelist', aliases: ['raze'] },
+  { key: 'reyna', displayName: 'Reyna', role: 'Duelist', aliases: ['reyna'] },
+  { key: 'sage', displayName: 'Sage', role: 'Sentinel', aliases: ['sage'] },
+  { key: 'skye', displayName: 'Skye', role: 'Initiator', aliases: ['skye'] },
+  { key: 'sova', displayName: 'Sova', role: 'Initiator', aliases: ['sova'] },
+  { key: 'tejo', displayName: 'Tejo', role: 'Initiator', aliases: ['tejo'] },
+  { key: 'viper', displayName: 'Viper', role: 'Controller', aliases: ['viper'] },
+  { key: 'vyse', displayName: 'Vyse', role: 'Sentinel', aliases: ['vyse'] },
+  { key: 'waylay', displayName: 'Waylay', role: 'Duelist', aliases: ['waylay'] },
+  { key: 'yoru', displayName: 'Yoru', role: 'Duelist', aliases: ['yoru'] },
+] as const;
+

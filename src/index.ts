@@ -1,3 +1,4 @@
+import { ValorantModule } from './apps/valorant/module.js';
 import { env } from './config/env.js';
 import { loadProfiles } from './core/profileLoader.js';
 import { ScanScheduler } from './core/scanScheduler.js';
@@ -12,6 +13,9 @@ async function bootstrap(): Promise<void> {
   const marketReferences = env.MARKET_REFERENCE_PROVIDER === 'geizhals'
     ? new GeizhalsReferenceService()
     : undefined;
+  const valorantModule = env.VALORANT_ENABLED
+    ? new ValorantModule()
+    : undefined;
   let scanner: ScannerService;
   let scheduler: ScanScheduler;
   const notifier = env.NOTIFIER_PROVIDER === 'discord'
@@ -21,6 +25,15 @@ async function bootstrap(): Promise<void> {
         onForceRescanRequested: async () => scheduler.triggerForceRescan(),
         onDebugScanRequested: async () => scheduler.triggerDebugScan(),
         onScanInfoRequested: async () => scheduler.getScanInfo(),
+        ...(valorantModule
+          ? {
+              onValorantStatusRequested: async () => valorantModule.getStatus(),
+              onValorantSyncRequested: async () => valorantModule.triggerManualSync(),
+              onValorantCompBuilderStart: async (userId: string) => valorantModule.startCompBuilder(userId),
+              onValorantCompBuilderAction: async (input: { userId: string; sessionId: string; action: import('./apps/valorant/domain/models.js').CompBuilderAction }) =>
+                valorantModule.handleCompBuilderAction(input.userId, input.sessionId, input.action),
+            }
+          : {}),
       })
     : new ConsoleNotifier();
 
@@ -35,11 +48,20 @@ async function bootstrap(): Promise<void> {
     await marketReferences.start(profiles);
   }
 
+  if (valorantModule) {
+    try {
+      await valorantModule.start();
+    } catch (error) {
+      logger.error({ error }, 'valorant module failed to start; continuing without scheduled valorant sync');
+    }
+  }
+
   logger.info({
     profiles: profiles.length,
     ebayProvider: env.EBAY_PROVIDER,
     notifierProvider: env.NOTIFIER_PROVIDER,
     marketReferenceProvider: env.MARKET_REFERENCE_PROVIDER,
+    valorantEnabled: env.VALORANT_ENABLED,
   }, 'gpu-search started');
 
   await scheduler.start();

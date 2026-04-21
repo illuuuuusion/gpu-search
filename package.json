@@ -11,6 +11,7 @@
     "refresh:references": "node dist/scripts/refreshReferences.js",
     "reset:scanner-state": "node dist/scripts/resetScannerState.js",
     "test:mock-scan": "node dist/scripts/testMockScan.js",
+    "valorant:sync": "node dist/scripts/valorantSync.js",
     "browser:doctor": "node dist/scripts/browserDoctor.js",
     "browser:prepare-libs": "node dist/scripts/prepareChromiumHost.js",
     "browser:install:firefox": "npx playwright install firefox",

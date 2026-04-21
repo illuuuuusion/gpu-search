@@ -1,5 +1,5 @@
 import { once } from 'node:events';
-import { ActivityType, Client, DiscordAPIError, EmbedBuilder, Events, GatewayIntentBits, MessageFlags, SlashCommandBuilder, } from 'discord.js';
+import { ActionRowBuilder, ActivityType, ButtonBuilder, ButtonStyle, Client, DiscordAPIError, EmbedBuilder, Events, GatewayIntentBits, MessageFlags, SlashCommandBuilder, StringSelectMenuBuilder, } from 'discord.js';
 import { env } from '../../config/env.js';
 import { logger } from '../../utils/logger.js';
 const DISCORD_ACTIVITY_NAME = 'eBay GPU-Deals';
@@ -8,6 +8,10 @@ const SCAN_NOW_COMMAND = 'scan-now';
 const FORCE_RESCAN_COMMAND = 'force-rescan';
 const DEBUG_SCAN_COMMAND = 'debug-scan';
 const SCAN_INFO_COMMAND = 'scan-info';
+const VCT_STATUS_COMMAND = 'vct-status';
+const VCT_SYNC_COMMAND = 'vct-sync';
+const COMP_BUILDER_COMMAND = 'compbuilder';
+const COMP_BUILDER_PREFIX = 'vct-comp';
 const ALERT_FOOTER_TEXT = 'GPU-Search';
 const AUTOMATIC_SCAN_STATUS_FOOTER_TEXT = 'GPU-Search • Auto-Scan-Status';
 const DISCORD_ADMIN_USER_IDS = new Set([
@@ -52,6 +56,179 @@ function formatScanStatusDescription(message) {
         ? `Der automatische Scan hat ${message.summary.alertsPosted} neue Alerts gepostet.`
         : 'Der automatische Scan hat keine neuen Alerts gefunden.';
 }
+function formatOptionalTimestamp(label, value) {
+    return `${label}: ${value ? formatDiscordTimestamp(value) : 'noch nicht vorhanden'}`;
+}
+function formatInteractionErrorMessage(error) {
+    if (error instanceof Error) {
+        return error.message;
+    }
+    return typeof error === 'string' ? error : undefined;
+}
+function formatPercent(value) {
+    return `${(value * 100).toFixed(1)}%`;
+}
+function formatValorantProvider(provider) {
+    return provider.toUpperCase();
+}
+function formatValorantStatusMessage(status) {
+    return [
+        `VALORANT-Modul aktiv: ${status.enabled ? 'ja' : 'nein'}`,
+        `Aktiver Provider: ${formatValorantProvider(status.provider)}`,
+        `Comp-Builder Daten bereit: ${status.aggregatedFullComps > 0 ? 'ja' : 'nein'}`,
+        `Sync läuft gerade: ${status.syncRunning ? 'ja' : 'nein'}`,
+        formatOptionalTimestamp('Nächster geplanter Sync', status.nextScheduledSyncAt),
+        formatOptionalTimestamp('Letzter Sync-Versuch', status.lastAttemptedSyncAt),
+        formatOptionalTimestamp('Letzter erfolgreicher Sync', status.lastSuccessfulSyncAt),
+        `Importierte Events im Snapshot: ${status.importedEvents}`,
+        `Geparste Comps: ${status.parsedCompositions}`,
+        `Aggregierte Full-Comps: ${status.aggregatedFullComps}`,
+        `Letzter Fehler: ${status.lastError ?? 'kein Fehler gespeichert'}`,
+    ].join('\n');
+}
+function buildCompBuilderCustomId(sessionId, action, value) {
+    return value
+        ? `${COMP_BUILDER_PREFIX}:${sessionId}:${action}:${value}`
+        : `${COMP_BUILDER_PREFIX}:${sessionId}:${action}`;
+}
+function parseCompBuilderCustomId(customId) {
+    if (!customId.startsWith(`${COMP_BUILDER_PREFIX}:`)) {
+        return null;
+    }
+    const [, sessionId, action, ...rest] = customId.split(':');
+    if (!sessionId || !action) {
+        return null;
+    }
+    return {
+        sessionId,
+        action,
+        value: rest.length > 0 ? rest.join(':') : undefined,
+    };
+}
+function parseRoleValue(value) {
+    switch ((value ?? '').toLowerCase()) {
+        case 'duelist':
+            return 'Duelist';
+        case 'initiator':
+            return 'Initiator';
+        case 'controller':
+            return 'Controller';
+        case 'sentinel':
+            return 'Sentinel';
+        default:
+            return null;
+    }
+}
+function formatCompBuilderEmbed(snapshot) {
+    const embed = new EmbedBuilder()
+        .setColor(snapshot.completed ? 0x57F287 : 0x5865F2)
+        .setTitle('VALORANT Comp Builder')
+        .setFooter({ text: `Sitzung aktiv bis ${new Date(snapshot.expiresAt).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' })} UTC` });
+    if (!snapshot.selectedMapKey) {
+        embed.setDescription('Wähle zuerst eine Map. Danach kannst du über Rollen und Agenten schrittweise die optimistischste Team-Comp eingrenzen.');
+        if (snapshot.availableMaps.length > 0) {
+            embed.addFields({
+                name: 'Verfügbare Maps',
+                value: snapshot.availableMaps
+                    .map(map => `${map.displayName} (${map.aggregateCount} Comps)`)
+                    .join('\n'),
+            });
+        }
+        else {
+            embed.addFields({
+                name: 'Keine Daten vorhanden',
+                value: 'Es sind noch keine aggregierten Comp-Daten verfügbar. Führe zuerst einen `/vct-sync` aus.',
+            });
+        }
+        return embed;
+    }
+    embed.setDescription([
+        `Map: **${snapshot.availableMaps.find(map => map.key === snapshot.selectedMapKey)?.displayName ?? snapshot.selectedMapKey}**`,
+        `Picks: ${snapshot.selectedAgentDisplayNames.length > 0 ? snapshot.selectedAgentDisplayNames.join(', ') : 'noch keine'}`,
+        `Gewählte Rolle: ${snapshot.selectedRole ?? 'noch keine'}`,
+    ].join('\n'));
+    if (snapshot.availableRoles.length > 0 && !snapshot.completed) {
+        embed.addFields({
+            name: 'Verfügbare Rollen',
+            value: snapshot.availableRoles
+                .map(role => `${role.role} (${role.agentCount})`)
+                .join(' • '),
+        });
+    }
+    if (snapshot.candidateAgents.length > 0) {
+        embed.addFields({
+            name: 'Beste nächste Agenten',
+            value: snapshot.candidateAgents
+                .slice(0, 5)
+                .map(agent => `${agent.displayName}: ${formatPercent(agent.bestSmoothedWinRate)} bei ${agent.supportingGames} Maps`)
+                .join('\n'),
+        });
+    }
+    if (snapshot.topCompositions.length > 0) {
+        embed.addFields({
+            name: 'Top Full-Comps',
+            value: snapshot.topCompositions
+                .slice(0, 3)
+                .map(comp => `${comp.agentDisplayNames.join(', ')}\n${formatPercent(comp.smoothedWinRate)} smoothed • ${formatPercent(comp.rawWinRate)} raw • ${comp.games} Maps`)
+                .join('\n\n'),
+        });
+    }
+    if (snapshot.exactComposition) {
+        embed.addFields({
+            name: 'Exakte Comp',
+            value: `${snapshot.exactComposition.agentDisplayNames.join(', ')}\n${formatPercent(snapshot.exactComposition.smoothedWinRate)} smoothed • ${formatPercent(snapshot.exactComposition.rawWinRate)} raw • ${snapshot.exactComposition.games} Maps`,
+        });
+    }
+    return embed;
+}
+function buildCompBuilderComponents(snapshot) {
+    const rows = [];
+    if (snapshot.availableMaps.length > 0) {
+        const mapRow = new ActionRowBuilder().addComponents(new StringSelectMenuBuilder()
+            .setCustomId(buildCompBuilderCustomId(snapshot.sessionId, 'map'))
+            .setPlaceholder('Map auswählen')
+            .setMinValues(1)
+            .setMaxValues(1)
+            .setOptions(snapshot.availableMaps.map(map => ({
+            label: map.displayName,
+            value: map.key,
+            description: `${map.aggregateCount} Full-Comps im Datensatz`,
+            default: map.key === snapshot.selectedMapKey,
+        }))));
+        rows.push(mapRow);
+    }
+    if (snapshot.selectedMapKey && snapshot.availableRoles.length > 0 && !snapshot.completed) {
+        const roleRow = new ActionRowBuilder().addComponents(...snapshot.availableRoles.map(role => new ButtonBuilder()
+            .setCustomId(buildCompBuilderCustomId(snapshot.sessionId, 'role', role.role.toLowerCase()))
+            .setLabel(`${role.role} (${role.agentCount})`)
+            .setStyle(role.role === snapshot.selectedRole ? ButtonStyle.Primary : ButtonStyle.Secondary)));
+        rows.push(roleRow);
+    }
+    if (snapshot.selectedRole && snapshot.candidateAgents.length > 0 && !snapshot.completed) {
+        const agentRow = new ActionRowBuilder().addComponents(new StringSelectMenuBuilder()
+            .setCustomId(buildCompBuilderCustomId(snapshot.sessionId, 'agent'))
+            .setPlaceholder(`${snapshot.selectedRole} wählen`)
+            .setMinValues(1)
+            .setMaxValues(1)
+            .setOptions(snapshot.candidateAgents.map(agent => ({
+            label: agent.displayName,
+            value: agent.key,
+            description: `Best ${formatPercent(agent.bestSmoothedWinRate)} • ${agent.supportingGames} Maps`,
+        }))));
+        rows.push(agentRow);
+    }
+    const controlsRow = new ActionRowBuilder().addComponents(new ButtonBuilder()
+        .setCustomId(buildCompBuilderCustomId(snapshot.sessionId, 'back'))
+        .setLabel('Zurück')
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(!snapshot.selectedMapKey && !snapshot.selectedRole && snapshot.selectedAgentKeys.length === 0), new ButtonBuilder()
+        .setCustomId(buildCompBuilderCustomId(snapshot.sessionId, 'reset'))
+        .setLabel('Reset')
+        .setStyle(ButtonStyle.Danger)
+        .setDisabled(!snapshot.selectedMapKey && !snapshot.selectedRole && snapshot.selectedAgentKeys.length === 0));
+    rows.push(controlsRow);
+    return rows;
+}
 function isUnknownInteractionError(error) {
     return error instanceof DiscordAPIError && error.code === 10062;
 }
@@ -80,21 +257,21 @@ export class DiscordNotifier {
             void this.handleInteraction(interaction).catch(error => {
                 if (isUnknownInteractionError(error)) {
                     logger.warn({
-                        commandName: interaction.isChatInputCommand() ? interaction.commandName : undefined,
+                        commandName: interaction.isChatInputCommand() ? interaction.commandName : interaction.isMessageComponent() ? interaction.customId : undefined,
                         interactionId: interaction.id,
                     }, 'Discord interaction expired before it could be acknowledged');
                     return;
                 }
                 if (isAlreadyAcknowledgedInteractionError(error)) {
                     logger.warn({
-                        commandName: interaction.isChatInputCommand() ? interaction.commandName : undefined,
+                        commandName: interaction.isChatInputCommand() ? interaction.commandName : interaction.isMessageComponent() ? interaction.customId : undefined,
                         interactionId: interaction.id,
                     }, 'Discord interaction had already been acknowledged');
                     return;
                 }
                 logger.error({
                     error,
-                    commandName: interaction.isChatInputCommand() ? interaction.commandName : undefined,
+                    commandName: interaction.isChatInputCommand() ? interaction.commandName : interaction.isMessageComponent() ? interaction.customId : undefined,
                     interactionId: interaction.id,
                 }, 'Failed to handle Discord interaction');
             });
@@ -302,6 +479,18 @@ export class DiscordNotifier {
                 .setName(SCAN_INFO_COMMAND)
                 .setDescription('Zeigt an, wann der nächste automatische Scan geplant ist.')
                 .toJSON(),
+            new SlashCommandBuilder()
+                .setName(VCT_STATUS_COMMAND)
+                .setDescription('Zeigt den Status des VALORANT-VCT-Ingests an.')
+                .toJSON(),
+            new SlashCommandBuilder()
+                .setName(VCT_SYNC_COMMAND)
+                .setDescription('Startet sofort einen manuellen VALORANT-VCT-Sync.')
+                .toJSON(),
+            new SlashCommandBuilder()
+                .setName(COMP_BUILDER_COMMAND)
+                .setDescription('Startet den interaktiven VALORANT Comp Builder.')
+                .toJSON(),
         ];
         if (guildId) {
             await this.client.application.commands.set(commands, guildId);
@@ -312,6 +501,10 @@ export class DiscordNotifier {
         this.commandsRegistered = true;
     }
     async handleInteraction(interaction) {
+        if ((interaction.isButton() || interaction.isStringSelectMenu()) && interaction.customId.startsWith(`${COMP_BUILDER_PREFIX}:`)) {
+            await this.handleCompBuilderComponentInteraction(interaction);
+            return;
+        }
         if (!interaction.isChatInputCommand()) {
             return;
         }
@@ -319,7 +512,26 @@ export class DiscordNotifier {
             interaction.commandName !== SCAN_NOW_COMMAND &&
             interaction.commandName !== FORCE_RESCAN_COMMAND &&
             interaction.commandName !== DEBUG_SCAN_COMMAND &&
-            interaction.commandName !== SCAN_INFO_COMMAND) {
+            interaction.commandName !== SCAN_INFO_COMMAND &&
+            interaction.commandName !== VCT_STATUS_COMMAND &&
+            interaction.commandName !== VCT_SYNC_COMMAND &&
+            interaction.commandName !== COMP_BUILDER_COMMAND) {
+            return;
+        }
+        if (interaction.commandName === COMP_BUILDER_COMMAND) {
+            if (!this.options.onValorantCompBuilderStart) {
+                await interaction.reply({
+                    content: 'Der Comp Builder ist aktuell nicht verfügbar.',
+                    flags: MessageFlags.Ephemeral,
+                });
+                return;
+            }
+            const snapshot = await this.options.onValorantCompBuilderStart(interaction.user.id);
+            await interaction.reply({
+                embeds: [formatCompBuilderEmbed(snapshot)],
+                components: buildCompBuilderComponents(snapshot),
+                flags: MessageFlags.Ephemeral,
+            });
             return;
         }
         if (!DISCORD_ADMIN_USER_IDS.has(interaction.user.id)) {
@@ -364,8 +576,44 @@ export class DiscordNotifier {
             });
             return;
         }
+        if (interaction.commandName === VCT_STATUS_COMMAND && !this.options.onValorantStatusRequested) {
+            await interaction.reply({
+                content: 'VALORANT-Status ist aktuell nicht verfügbar.',
+                flags: MessageFlags.Ephemeral,
+            });
+            return;
+        }
+        if (interaction.commandName === VCT_SYNC_COMMAND && !this.options.onValorantSyncRequested) {
+            await interaction.reply({
+                content: 'VALORANT-Sync ist aktuell nicht verfügbar.',
+                flags: MessageFlags.Ephemeral,
+            });
+            return;
+        }
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
         try {
+            if (interaction.commandName === VCT_STATUS_COMMAND) {
+                const status = await this.options.onValorantStatusRequested?.();
+                await interaction.editReply(status ? formatValorantStatusMessage(status) : 'VALORANT-Status ist aktuell nicht verfügbar.');
+                return;
+            }
+            if (interaction.commandName === VCT_SYNC_COMMAND) {
+                const result = await this.options.onValorantSyncRequested?.();
+                if (!result) {
+                    await interaction.editReply('VALORANT-Sync ist aktuell nicht verfügbar.');
+                    return;
+                }
+                await interaction.editReply([
+                    `VALORANT-VCT-Sync abgeschlossen: ${result.run.status}.`,
+                    `Provider: ${formatValorantProvider(result.run.provider)}`,
+                    `Importierte Events: ${result.run.importedEvents}`,
+                    `Geparste Comps: ${result.run.parsedCompositions}`,
+                    `Aggregierte Full-Comps: ${result.run.aggregatedFullComps}`,
+                    `Letzter erfolgreicher Sync: ${result.state.metadata.lastSuccessfulSyncAt ? formatDiscordTimestamp(result.state.metadata.lastSuccessfulSyncAt) : 'noch nicht vorhanden'}`,
+                    `Letzter Fehler: ${result.run.error ?? result.state.metadata.lastError ?? 'kein Fehler gespeichert'}`,
+                ].join('\n'));
+                return;
+            }
             if (interaction.commandName === SCAN_INFO_COMMAND) {
                 const info = await this.options.onScanInfoRequested?.();
                 const message = info?.nextAutomaticScanAt
@@ -419,10 +667,77 @@ export class DiscordNotifier {
             else if (interaction.commandName === SCAN_INFO_COMMAND) {
                 await interaction.editReply('Scan-Info konnte nicht geladen werden.');
             }
+            else if (interaction.commandName === VCT_SYNC_COMMAND) {
+                const formattedError = formatInteractionErrorMessage(error);
+                await interaction.editReply(formattedError
+                    ? `VALORANT-Sync fehlgeschlagen.\n${formattedError}`
+                    : 'VALORANT-Sync konnte nicht gestartet werden.');
+            }
+            else if (interaction.commandName === VCT_STATUS_COMMAND) {
+                await interaction.editReply('VALORANT-Status konnte nicht geladen werden.');
+            }
             else {
                 await interaction.editReply('Manueller Scan konnte nicht gestartet werden.');
             }
             throw error;
         }
+    }
+    async handleCompBuilderComponentInteraction(interaction) {
+        const parsed = parseCompBuilderCustomId(interaction.customId);
+        if (!parsed || !this.options.onValorantCompBuilderAction) {
+            await interaction.reply({
+                content: 'Diese Comp-Builder-Aktion ist aktuell nicht verfügbar.',
+                flags: MessageFlags.Ephemeral,
+            });
+            return;
+        }
+        let action = null;
+        if (parsed.action === 'back') {
+            action = { type: 'back' };
+        }
+        else if (parsed.action === 'reset') {
+            action = { type: 'reset' };
+        }
+        else if (parsed.action === 'role' && interaction.isButton()) {
+            const role = parseRoleValue(parsed.value);
+            if (role) {
+                action = { type: 'set_role', role };
+            }
+        }
+        else if (parsed.action === 'map' && interaction.isStringSelectMenu()) {
+            const mapKey = interaction.values[0];
+            if (mapKey) {
+                action = { type: 'set_map', mapKey };
+            }
+        }
+        else if (parsed.action === 'agent' && interaction.isStringSelectMenu()) {
+            const agentKey = interaction.values[0];
+            if (agentKey) {
+                action = { type: 'pick_agent', agentKey };
+            }
+        }
+        if (!action) {
+            await interaction.reply({
+                content: 'Diese Comp-Builder-Aktion konnte nicht verarbeitet werden.',
+                flags: MessageFlags.Ephemeral,
+            });
+            return;
+        }
+        const snapshot = await this.options.onValorantCompBuilderAction({
+            userId: interaction.user.id,
+            sessionId: parsed.sessionId,
+            action,
+        });
+        if (!snapshot) {
+            await interaction.reply({
+                content: 'Diese Comp-Builder-Sitzung ist abgelaufen oder gehört dir nicht. Starte `/compbuilder` neu.',
+                flags: MessageFlags.Ephemeral,
+            });
+            return;
+        }
+        await interaction.update({
+            embeds: [formatCompBuilderEmbed(snapshot)],
+            components: buildCompBuilderComponents(snapshot),
+        });
     }
 }
