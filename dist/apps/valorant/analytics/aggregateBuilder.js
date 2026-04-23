@@ -26,6 +26,9 @@ export function buildFullCompositionAggregates(compositions) {
                 smoothedWinRate: 0,
                 lastPlayedAt: composition.playedAt,
                 scopes: [composition.scope],
+                sourceEventIds: composition.sourceEventId ? [composition.sourceEventId] : [],
+                sourceUrls: composition.sourceUrl ? [composition.sourceUrl] : [],
+                latestSourceUrl: composition.sourceUrl,
                 exampleTeams: [composition.teamName],
             });
             continue;
@@ -37,6 +40,16 @@ export function buildFullCompositionAggregates(compositions) {
         }
         if (!existing.scopes.includes(composition.scope)) {
             existing.scopes.push(composition.scope);
+        }
+        if (composition.sourceEventId && !existing.sourceEventIds.includes(composition.sourceEventId)) {
+            existing.sourceEventIds.push(composition.sourceEventId);
+        }
+        if (composition.sourceUrl && !existing.sourceUrls.includes(composition.sourceUrl) && existing.sourceUrls.length < 5) {
+            existing.sourceUrls.push(composition.sourceUrl);
+        }
+        if (composition.sourceUrl
+            && new Date(composition.playedAt).getTime() >= new Date(existing.lastPlayedAt).getTime()) {
+            existing.latestSourceUrl = composition.sourceUrl;
         }
         if (!existing.exampleTeams.includes(composition.teamName) && existing.exampleTeams.length < 3) {
             existing.exampleTeams.push(composition.teamName);

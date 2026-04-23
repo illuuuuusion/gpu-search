@@ -11,6 +11,7 @@ export type ValorantTournamentScope =
 export type ValorantSyncTrigger = 'startup' | 'scheduled' | 'manual';
 export type ValorantCompositionProvider = 'vlr' | 'grid';
 export type ValorantSourceEventStatus = 'upcoming' | 'ongoing' | 'completed';
+export type ValorantHealthState = 'healthy' | 'degraded';
 
 export interface StaticAgentDefinition {
   key: string;
@@ -68,6 +69,7 @@ export interface CompositionRecord {
   scope: ValorantTournamentScope;
   sourceEventId?: string;
   sourceUrl?: string;
+  eventStatus?: ValorantSourceEventStatus;
 }
 
 export interface FullCompositionAggregate {
@@ -80,6 +82,9 @@ export interface FullCompositionAggregate {
   smoothedWinRate: number;
   lastPlayedAt: string;
   scopes: ValorantTournamentScope[];
+  sourceEventIds: string[];
+  sourceUrls: string[];
+  latestSourceUrl?: string;
   exampleTeams: string[];
 }
 
@@ -114,15 +119,56 @@ export interface ValorantSnapshotMetadata {
   nextScheduledSyncAt?: string;
   lastAttemptedSyncAt?: string;
   lastSuccessfulSyncAt?: string;
+  healthState?: ValorantHealthState;
+  healthReasons?: string[];
   lastError?: string;
+}
+
+export interface ValorantMatchReference {
+  path: string;
+  playedAt: string;
+  fetchedAt: string;
+}
+
+export interface CompBuilderFilters {
+  scope?: ValorantTournamentScope;
+  eventId?: string;
+  eventStatus?: ValorantSourceEventStatus;
+  days?: number;
+  teamQuery?: string;
+}
+
+export interface CompBuilderPreset {
+  id: string;
+  userId: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+  filters: CompBuilderFilters;
+  selectedMapKey?: string;
+  selectedAgentKeys: string[];
+  excludedAgentKeys: string[];
+}
+
+export interface CompBuilderPresetSummary {
+  id: string;
+  name: string;
+  updatedAt: string;
+}
+
+export interface CompBuilderStartOptions {
+  filters: CompBuilderFilters;
+  presetId?: string;
 }
 
 export interface ValorantSnapshotState {
   version: 2;
   metadata: ValorantSnapshotMetadata;
   sourceEvents: ValorantSourceEvent[];
+  matchReferences: ValorantMatchReference[];
   compositions: CompositionRecord[];
   fullCompositionAggregates: FullCompositionAggregate[];
+  builderPresets: CompBuilderPreset[];
   syncRuns: ValorantSyncRun[];
 }
 
@@ -141,6 +187,8 @@ export interface ValorantStatusSnapshot {
   nextScheduledSyncAt?: string;
   lastAttemptedSyncAt?: string;
   lastSuccessfulSyncAt?: string;
+  healthState: ValorantHealthState;
+  healthReasons: string[];
   lastError?: string;
   importedEvents: number;
   parsedCompositions: number;
@@ -175,20 +223,35 @@ export interface CompBuilderRecommendedComposition {
   wins: number;
   rawWinRate: number;
   smoothedWinRate: number;
+  confidenceLabel: string;
+  lastPlayedAt: string;
+  exampleTeams: string[];
+  eventIds: string[];
+  eventNames: string[];
+  latestSourceUrl?: string;
 }
 
 export interface CompBuilderSnapshot {
   sessionId: string;
   expiresAt: string;
+  provider: ValorantCompositionProvider;
+  importedEvents: number;
+  lastSuccessfulSyncAt?: string;
+  healthState: ValorantHealthState;
   selectedMapKey?: string;
   selectedRole?: ValorantAgentRole;
   selectedAgentKeys: string[];
   selectedAgentDisplayNames: string[];
+  excludedAgentKeys: string[];
+  excludedAgentDisplayNames: string[];
+  filters: CompBuilderFilters;
   availableMaps: CompBuilderMapOption[];
   availableRoles: CompBuilderRoleOption[];
   candidateAgents: CompBuilderAgentOption[];
   topCompositions: CompBuilderRecommendedComposition[];
   exactComposition?: CompBuilderRecommendedComposition;
+  savedPresets: CompBuilderPresetSummary[];
+  replacementAgentKey?: string;
   completed: boolean;
 }
 
@@ -196,5 +259,10 @@ export type CompBuilderAction =
   | { type: 'set_map'; mapKey: string }
   | { type: 'set_role'; role: ValorantAgentRole }
   | { type: 'pick_agent'; agentKey: string }
+  | { type: 'exclude_agent'; agentKey: string }
+  | { type: 'include_agent'; agentKey: string }
+  | { type: 'replace_agent'; agentKey: string }
+  | { type: 'save_preset'; name: string }
+  | { type: 'load_preset'; presetId: string }
   | { type: 'back' }
   | { type: 'reset' };

@@ -28,7 +28,13 @@ async function bootstrap() {
                 ? {
                     onValorantStatusRequested: async () => valorantModule.getStatus(),
                     onValorantSyncRequested: async () => valorantModule.triggerManualSync(),
-                    onValorantCompBuilderStart: async (userId) => valorantModule.startCompBuilder(userId),
+                    onValorantHelpRequested: async () => valorantModule.getHelpText(),
+                    onValorantTopRequested: async (input) => valorantModule.getTopCompositionsText(input),
+                    onValorantAgentRequested: async (input) => valorantModule.getAgentText(input),
+                    onValorantMapMetaRequested: async (input) => valorantModule.getMapMetaText(input),
+                    onValorantEventsRequested: async (input) => valorantModule.getEventsText(input),
+                    onValorantTeamRequested: async (input) => valorantModule.getTeamText(input),
+                    onValorantCompBuilderStart: async (userId, options) => valorantModule.startCompBuilder(userId, options),
                     onValorantCompBuilderAction: async (input) => valorantModule.handleCompBuilderAction(input.userId, input.sessionId, input.action),
                 }
                 : {}),
@@ -43,6 +49,7 @@ async function bootstrap() {
         await marketReferences.start(profiles);
     }
     if (valorantModule) {
+        valorantModule.attachNotifier(notifier);
         try {
             await valorantModule.start();
         }

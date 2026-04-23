@@ -29,7 +29,55 @@ async function bootstrap(): Promise<void> {
           ? {
               onValorantStatusRequested: async () => valorantModule.getStatus(),
               onValorantSyncRequested: async () => valorantModule.triggerManualSync(),
-              onValorantCompBuilderStart: async (userId: string) => valorantModule.startCompBuilder(userId),
+              onValorantHelpRequested: async () => valorantModule.getHelpText(),
+              onValorantTopRequested: async (input: {
+                mapQuery: string;
+                scope?: import('./apps/valorant/domain/models.js').ValorantTournamentScope;
+                eventQuery?: string;
+                eventStatus?: import('./apps/valorant/domain/models.js').ValorantSourceEventStatus;
+                days?: number;
+                teamQuery?: string;
+              }) => valorantModule.getTopCompositionsText(input),
+              onValorantAgentRequested: async (input: {
+                agentQuery: string;
+                scope?: import('./apps/valorant/domain/models.js').ValorantTournamentScope;
+                eventQuery?: string;
+                eventStatus?: import('./apps/valorant/domain/models.js').ValorantSourceEventStatus;
+                days?: number;
+                teamQuery?: string;
+              }) => valorantModule.getAgentText(input),
+              onValorantMapMetaRequested: async (input: {
+                mapQuery: string;
+                scope?: import('./apps/valorant/domain/models.js').ValorantTournamentScope;
+                eventQuery?: string;
+                eventStatus?: import('./apps/valorant/domain/models.js').ValorantSourceEventStatus;
+                days?: number;
+                teamQuery?: string;
+              }) => valorantModule.getMapMetaText(input),
+              onValorantEventsRequested: async (input: {
+                scope?: import('./apps/valorant/domain/models.js').ValorantTournamentScope;
+                eventQuery?: string;
+                eventStatus?: import('./apps/valorant/domain/models.js').ValorantSourceEventStatus;
+                days?: number;
+                teamQuery?: string;
+              }) => valorantModule.getEventsText(input),
+              onValorantTeamRequested: async (input: {
+                teamQuery: string;
+                scope?: import('./apps/valorant/domain/models.js').ValorantTournamentScope;
+                eventQuery?: string;
+                eventStatus?: import('./apps/valorant/domain/models.js').ValorantSourceEventStatus;
+                days?: number;
+              }) => valorantModule.getTeamText(input),
+              onValorantCompBuilderStart: async (
+                userId: string,
+                options: {
+                  scope?: import('./apps/valorant/domain/models.js').ValorantTournamentScope;
+                  eventQuery?: string;
+                  eventStatus?: import('./apps/valorant/domain/models.js').ValorantSourceEventStatus;
+                  days?: number;
+                  teamQuery?: string;
+                },
+              ) => valorantModule.startCompBuilder(userId, options),
               onValorantCompBuilderAction: async (input: { userId: string; sessionId: string; action: import('./apps/valorant/domain/models.js').CompBuilderAction }) =>
                 valorantModule.handleCompBuilderAction(input.userId, input.sessionId, input.action),
             }
@@ -49,6 +97,7 @@ async function bootstrap(): Promise<void> {
   }
 
   if (valorantModule) {
+    valorantModule.attachNotifier(notifier);
     try {
       await valorantModule.start();
     } catch (error) {

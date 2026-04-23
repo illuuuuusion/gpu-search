@@ -31,7 +31,15 @@ export class ValorantSyncScheduler {
     }
     async runAndReschedule(trigger) {
         if (!this.runningPromise) {
-            this.runningPromise = this.syncService.runSync(trigger).finally(() => {
+            const previousState = await this.repository.load();
+            this.runningPromise = this.syncService.runSync(trigger)
+                .then(async (result) => {
+                if (this.options.onSyncCompleted) {
+                    await this.options.onSyncCompleted(result, previousState);
+                }
+                return result;
+            })
+                .finally(() => {
                 this.runningPromise = null;
             });
         }
@@ -64,5 +72,8 @@ export class ValorantSyncScheduler {
             clearTimeout(this.timer);
             this.timer = null;
         }
+    }
+    setOnSyncCompleted(listener) {
+        this.options.onSyncCompleted = listener;
     }
 }

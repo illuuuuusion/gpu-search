@@ -34,10 +34,23 @@ export interface ScanStatusMessage {
   summary?: ScanStatusSummary;
 }
 
+export interface ValorantSyncStatusMessage {
+  trigger: 'startup' | 'scheduled' | 'manual';
+  provider: string;
+  healthState: 'healthy' | 'degraded';
+  healthReasons: string[];
+  importedEvents: number;
+  parsedCompositions: number;
+  aggregatedFullComps: number;
+  lastSuccessfulSyncAt?: string;
+  metaChanges: string[];
+}
+
 export interface Notifier {
   start?(): Promise<void>;
   send(message: AlertMessage): Promise<NotificationReceipt | void>;
   sendScanStatus?(message: ScanStatusMessage): Promise<void>;
+  sendValorantSyncStatus?(message: ValorantSyncStatusMessage): Promise<void>;
   delete?(receipt: NotificationReceipt): Promise<void>;
 }
 
@@ -60,6 +73,12 @@ export class ConsoleNotifier implements Notifier {
       ? ` alerts=${message.summary.alertsPosted} accepted=${message.summary.acceptedListings} unique=${message.summary.uniqueListings}`
       : '';
     console.log(`[scan-status] trigger=${message.trigger} phase=${message.phase}${summary}`);
+  }
+
+  async sendValorantSyncStatus(message: ValorantSyncStatusMessage): Promise<void> {
+    console.log(
+      `[valorant-sync] trigger=${message.trigger} provider=${message.provider} health=${message.healthState} events=${message.importedEvents} comps=${message.parsedCompositions} full_comps=${message.aggregatedFullComps} meta=${message.metaChanges.join(' | ')}`,
+    );
   }
 
   async delete(): Promise<void> {

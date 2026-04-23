@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { VALORANT_AGENTS } from '../config/agents.js';
 import { VALORANT_MAPS } from '../config/maps.js';
+import { buildFilteredAggregates, getConfidenceLabel, getEventNamesFromIds, getRoleForAgent } from '../query/insightsService.js';
 const ROLE_ORDER = ['Duelist', 'Initiator', 'Controller', 'Sentinel'];
 const MIN_RECOMMENDED_SAMPLE_GAMES = 3;
 const AGENT_BY_KEY = new Map(VALORANT_AGENTS.map(agent => [agent.key, agent]));
@@ -15,7 +16,7 @@ function sortAgentKeysForDisplay(agentKeys) {
             || (leftAgent?.displayName ?? left).localeCompare(rightAgent?.displayName ?? right);
     });
 }
-function createRecommendedComposition(aggregate) {
+function createRecommendedComposition(aggregate, state) {
     const orderedAgentKeys = sortAgentKeysForDisplay(aggregate.agentKeys);
     return {
         id: aggregate.id,
@@ -25,14 +26,53 @@ function createRecommendedComposition(aggregate) {
         wins: aggregate.wins,
         rawWinRate: aggregate.rawWinRate,
         smoothedWinRate: aggregate.smoothedWinRate,
+        confidenceLabel: getConfidenceLabel(aggregate.games),
+        lastPlayedAt: aggregate.lastPlayedAt,
+        exampleTeams: aggregate.exampleTeams,
+        eventIds: aggregate.sourceEventIds,
+        eventNames: getEventNamesFromIds(state.sourceEvents, aggregate.sourceEventIds).slice(0, 3),
+        latestSourceUrl: aggregate.latestSourceUrl,
+    };
+}
+function applySessionFilters(aggregates, session) {
+    return aggregates.filter(aggregate => session.excludedAgentKeys.every(agentKey => !aggregate.agentKeys.includes(agentKey))
+        && (session.selectedMapKey ? aggregate.mapName === session.selectedMapKey : true)
+        && session.selectedAgentKeys.every(agentKey => aggregate.agentKeys.includes(agentKey)));
+}
+function buildPresetSummary(state, userId) {
+    return state.builderPresets
+        .filter(preset => preset.userId === userId)
+        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+        .slice(0, 10)
+        .map(preset => ({
+        id: preset.id,
+        name: preset.name,
+        updatedAt: preset.updatedAt,
+    }));
+}
+function buildDefaultSession(userId, sessionTtlMinutes, options) {
+    const createdAt = new Date();
+    const expiresAt = new Date(createdAt);
+    expiresAt.setUTCMinutes(expiresAt.getUTCMinutes() + sessionTtlMinutes);
+    return {
+        id: randomUUID(),
+        userId,
+        createdAt: createdAt.toISOString(),
+        updatedAt: createdAt.toISOString(),
+        expiresAt: expiresAt.toISOString(),
+        filters: options.filters,
+        selectedAgentKeys: [],
+        excludedAgentKeys: [],
     };
 }
 export class CompBuilderService {
     repository;
+    insights;
     sessionTtlMinutes;
     sessions = new Map();
-    constructor(repository, sessionTtlMinutes) {
+    constructor(repository, insights, sessionTtlMinutes) {
         this.repository = repository;
+        this.insights = insights;
         this.sessionTtlMinutes = sessionTtlMinutes;
     }
     purgeExpiredSessions(now = Date.now()) {
@@ -42,21 +82,6 @@ export class CompBuilderService {
             }
         }
     }
-    createSession(userId) {
-        const createdAt = new Date();
-        const expiresAt = new Date(createdAt);
-        expiresAt.setUTCMinutes(expiresAt.getUTCMinutes() + this.sessionTtlMinutes);
-        const session = {
-            id: randomUUID(),
-            userId,
-            createdAt: createdAt.toISOString(),
-            updatedAt: createdAt.toISOString(),
-            expiresAt: expiresAt.toISOString(),
-            selectedAgentKeys: [],
-        };
-        this.sessions.set(session.id, session);
-        return session;
-    }
     touchSession(session) {
         const updatedAt = new Date();
         const expiresAt = new Date(updatedAt);
@@ -64,23 +89,31 @@ export class CompBuilderService {
         session.updatedAt = updatedAt.toISOString();
         session.expiresAt = expiresAt.toISOString();
     }
-    getCandidateAggregates(aggregates, session) {
-        if (!session.selectedMapKey) {
-            return [];
+    hydrateSessionFromPreset(session, preset) {
+        if (!preset) {
+            return;
         }
-        return aggregates.filter(aggregate => aggregate.mapName === session.selectedMapKey
-            && session.selectedAgentKeys.every(agentKey => aggregate.agentKeys.includes(agentKey)));
+        session.filters = preset.filters;
+        session.selectedMapKey = preset.selectedMapKey;
+        session.selectedAgentKeys = [...preset.selectedAgentKeys];
+        session.excludedAgentKeys = [...preset.excludedAgentKeys];
+        session.selectedRole = undefined;
+        session.replacementAgentKey = undefined;
     }
-    buildSnapshotFromSession(session, aggregates) {
-        const availableMaps = [...new Map(aggregates.map(aggregate => [
+    getFilteredAggregates(state, session) {
+        return buildFilteredAggregates(state, session.filters, new Date());
+    }
+    buildSnapshotFromSession(session, state) {
+        const filteredAggregates = this.getFilteredAggregates(state, session);
+        const availableMaps = [...new Map(filteredAggregates.map(aggregate => [
                 aggregate.mapName,
                 {
                     key: aggregate.mapName,
                     displayName: MAP_BY_KEY.get(aggregate.mapName)?.displayName ?? aggregate.mapName,
-                    aggregateCount: aggregates.filter(candidate => candidate.mapName === aggregate.mapName).length,
+                    aggregateCount: filteredAggregates.filter(candidate => candidate.mapName === aggregate.mapName).length,
                 },
             ])).values()].sort((left, right) => left.displayName.localeCompare(right.displayName));
-        const candidateAggregates = this.getCandidateAggregates(aggregates, session);
+        const candidateAggregates = applySessionFilters(filteredAggregates, session);
         const rankingAggregates = candidateAggregates.some(aggregate => aggregate.games >= MIN_RECOMMENDED_SAMPLE_GAMES)
             ? candidateAggregates.filter(aggregate => aggregate.games >= MIN_RECOMMENDED_SAMPLE_GAMES)
             : candidateAggregates;
@@ -90,7 +123,9 @@ export class CompBuilderService {
             const roleCounts = new Map();
             for (const aggregate of rankingAggregates) {
                 for (const agentKey of aggregate.agentKeys) {
-                    if (session.selectedAgentKeys.includes(agentKey)) {
+                    if (session.selectedAgentKeys.includes(agentKey)
+                        || session.excludedAgentKeys.includes(agentKey)
+                        || agentKey === session.replacementAgentKey) {
                         continue;
                     }
                     const agent = AGENT_BY_KEY.get(agentKey);
@@ -116,7 +151,9 @@ export class CompBuilderService {
                 const statsByAgent = new Map();
                 for (const aggregate of rankingAggregates) {
                     for (const agentKey of aggregate.agentKeys) {
-                        if (session.selectedAgentKeys.includes(agentKey)) {
+                        if (session.selectedAgentKeys.includes(agentKey)
+                            || session.excludedAgentKeys.includes(agentKey)
+                            || agentKey === session.replacementAgentKey) {
                             continue;
                         }
                         const agent = AGENT_BY_KEY.get(agentKey);
@@ -151,7 +188,7 @@ export class CompBuilderService {
             || right.games - left.games
             || right.lastPlayedAt.localeCompare(left.lastPlayedAt))
             .slice(0, 5)
-            .map(createRecommendedComposition);
+            .map(aggregate => createRecommendedComposition(aggregate, state));
         const completed = session.selectedAgentKeys.length === 5;
         const exactAggregate = completed
             ? candidateAggregates.find(aggregate => aggregate.agentKeys.length === 5
@@ -160,23 +197,66 @@ export class CompBuilderService {
         return {
             sessionId: session.id,
             expiresAt: session.expiresAt,
+            provider: state.metadata.provider,
+            importedEvents: state.sourceEvents.length,
+            lastSuccessfulSyncAt: state.metadata.lastSuccessfulSyncAt,
+            healthState: state.metadata.healthState ?? 'healthy',
             selectedMapKey: session.selectedMapKey,
             selectedRole: session.selectedRole,
             selectedAgentKeys: session.selectedAgentKeys,
             selectedAgentDisplayNames: session.selectedAgentKeys.map(agentKey => AGENT_BY_KEY.get(agentKey)?.displayName ?? agentKey),
+            excludedAgentKeys: session.excludedAgentKeys,
+            excludedAgentDisplayNames: session.excludedAgentKeys.map(agentKey => AGENT_BY_KEY.get(agentKey)?.displayName ?? agentKey),
+            filters: session.filters,
             availableMaps,
             availableRoles,
             candidateAgents: candidateAgents.slice(0, 25),
             topCompositions,
-            exactComposition: exactAggregate ? createRecommendedComposition(exactAggregate) : undefined,
+            exactComposition: exactAggregate ? createRecommendedComposition(exactAggregate, state) : undefined,
+            savedPresets: buildPresetSummary(state, session.userId),
+            replacementAgentKey: session.replacementAgentKey,
             completed,
         };
     }
-    async startSession(userId) {
-        this.purgeExpiredSessions();
-        const session = this.createSession(userId);
+    async persistPreset(session, name) {
+        const presetName = name.trim();
+        if (!presetName) {
+            return;
+        }
         const state = await this.repository.load();
-        return this.buildSnapshotFromSession(session, state.fullCompositionAggregates);
+        const existingPreset = state.builderPresets.find(preset => preset.userId === session.userId
+            && preset.name.toLowerCase() === presetName.toLowerCase());
+        const now = new Date().toISOString();
+        const nextPreset = {
+            id: existingPreset?.id ?? randomUUID(),
+            userId: session.userId,
+            name: presetName,
+            createdAt: existingPreset?.createdAt ?? now,
+            updatedAt: now,
+            filters: session.filters,
+            selectedMapKey: session.selectedMapKey,
+            selectedAgentKeys: [...session.selectedAgentKeys],
+            excludedAgentKeys: [...session.excludedAgentKeys],
+        };
+        const nextState = {
+            ...state,
+            builderPresets: [
+                nextPreset,
+                ...state.builderPresets.filter(preset => preset.id !== nextPreset.id),
+            ].slice(0, 50),
+        };
+        await this.repository.save(nextState);
+        this.insights.primeState(nextState);
+    }
+    async startSession(userId, options) {
+        this.purgeExpiredSessions();
+        const state = await this.insights.getState();
+        const session = buildDefaultSession(userId, this.sessionTtlMinutes, options);
+        if (options.presetId) {
+            this.hydrateSessionFromPreset(session, state.builderPresets.find(preset => preset.id === options.presetId && preset.userId === userId));
+        }
+        this.sessions.set(session.id, session);
+        return this.buildSnapshotFromSession(session, state);
     }
     async applyAction(userId, sessionId, action) {
         this.purgeExpiredSessions();
@@ -184,58 +264,79 @@ export class CompBuilderService {
         if (!session || session.userId !== userId) {
             return null;
         }
-        const state = await this.repository.load();
-        const aggregates = state.fullCompositionAggregates;
-        const currentSnapshot = this.buildSnapshotFromSession(session, aggregates);
         switch (action.type) {
-            case 'set_map': {
-                if (!currentSnapshot.availableMaps.some(map => map.key === action.mapKey)) {
-                    return currentSnapshot;
-                }
+            case 'save_preset':
+                await this.persistPreset(session, action.name);
+                break;
+            case 'load_preset': {
+                const state = await this.insights.getState();
+                this.hydrateSessionFromPreset(session, state.builderPresets.find(preset => preset.id === action.presetId && preset.userId === userId));
+                break;
+            }
+            case 'set_map':
                 session.selectedMapKey = action.mapKey;
                 session.selectedRole = undefined;
                 session.selectedAgentKeys = [];
+                session.excludedAgentKeys = [];
+                session.replacementAgentKey = undefined;
                 break;
-            }
-            case 'set_role': {
-                if (!currentSnapshot.availableRoles.some(role => role.role === action.role)) {
-                    return currentSnapshot;
-                }
+            case 'set_role':
                 session.selectedRole = action.role;
                 break;
-            }
-            case 'pick_agent': {
-                if (!currentSnapshot.candidateAgents.some(agent => agent.key === action.agentKey)) {
-                    return currentSnapshot;
-                }
+            case 'pick_agent':
                 if (!session.selectedAgentKeys.includes(action.agentKey)) {
                     session.selectedAgentKeys = [...session.selectedAgentKeys, action.agentKey];
                 }
                 session.selectedRole = undefined;
+                session.replacementAgentKey = undefined;
                 break;
-            }
-            case 'back': {
+            case 'exclude_agent':
+                if (!session.selectedAgentKeys.includes(action.agentKey)
+                    && !session.excludedAgentKeys.includes(action.agentKey)) {
+                    session.excludedAgentKeys = [...session.excludedAgentKeys, action.agentKey];
+                }
+                session.selectedRole = undefined;
+                break;
+            case 'include_agent':
+                session.excludedAgentKeys = session.excludedAgentKeys.filter(agentKey => agentKey !== action.agentKey);
+                break;
+            case 'replace_agent':
+                if (session.selectedAgentKeys.includes(action.agentKey)) {
+                    session.selectedAgentKeys = session.selectedAgentKeys.filter(agentKey => agentKey !== action.agentKey);
+                    session.replacementAgentKey = action.agentKey;
+                    session.selectedRole = getRoleForAgent(action.agentKey);
+                }
+                break;
+            case 'back':
                 if (session.selectedRole) {
                     session.selectedRole = undefined;
                 }
+                else if (session.replacementAgentKey) {
+                    session.selectedAgentKeys = [...session.selectedAgentKeys, session.replacementAgentKey];
+                    session.replacementAgentKey = undefined;
+                }
                 else if (session.selectedAgentKeys.length > 0) {
                     session.selectedAgentKeys = session.selectedAgentKeys.slice(0, -1);
+                }
+                else if (session.excludedAgentKeys.length > 0) {
+                    session.excludedAgentKeys = session.excludedAgentKeys.slice(0, -1);
                 }
                 else if (session.selectedMapKey) {
                     session.selectedMapKey = undefined;
                 }
                 break;
-            }
-            case 'reset': {
+            case 'reset':
                 session.selectedMapKey = undefined;
                 session.selectedRole = undefined;
                 session.selectedAgentKeys = [];
+                session.excludedAgentKeys = [];
+                session.replacementAgentKey = undefined;
                 break;
-            }
             default:
                 break;
         }
         this.touchSession(session);
-        return this.buildSnapshotFromSession(session, aggregates);
+        const state = await this.insights.getState();
+        return this.buildSnapshotFromSession(session, state);
     }
 }

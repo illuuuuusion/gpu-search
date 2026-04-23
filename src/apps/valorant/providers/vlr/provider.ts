@@ -3,6 +3,7 @@ import { VALORANT_AGENTS } from '../../config/agents.js';
 import { VALORANT_MAPS } from '../../config/maps.js';
 import type {
   CompositionRecord,
+  ValorantMatchReference,
   ValorantSourceEvent,
   ValorantSourceEventStatus,
   ValorantTournamentScope,
@@ -18,9 +19,11 @@ interface VlrProviderOptions {
   baseUrl: string;
   minRequestIntervalMs: number;
   maxEventPages: number;
+  maxMatchTimestampLookups: number;
+  recentMatchDays: number;
 }
 
-interface VlrEventCard {
+export interface VlrEventCard {
   id: string;
   slug: string;
   title: string;
@@ -114,6 +117,18 @@ function parseDateValue(rawValue: string | undefined): string | undefined {
   return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
 }
 
+function parseUtcTimestamp(rawValue: string | undefined): string | undefined {
+  if (!rawValue) {
+    return undefined;
+  }
+
+  const normalized = rawValue.includes('T')
+    ? rawValue
+    : `${rawValue.replace(' ', 'T')}Z`;
+  const parsed = new Date(normalized);
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
+}
+
 function parseEventDateRange(rawValue: string | undefined): {
   startDate?: string;
   endDate?: string;
@@ -149,7 +164,7 @@ function resolveCompositionPlayedAt(event: ValorantSourceEvent, now: Date): stri
   return new Date(Math.min(Math.max(...candidateTimestamps), now.getTime())).toISOString();
 }
 
-function extractEventCards(html: string, baseUrl: string): VlrEventCard[] {
+export function extractVlrEventCards(html: string, baseUrl: string): VlrEventCard[] {
   const cards: VlrEventCard[] = [];
   const expression = /<a class="wf-card mod-flex event-item" href="([^"]+)"[\s\S]*?<div class="event-item-title">\s*([\s\S]*?)\s*<\/div>[\s\S]*?<span class="event-item-desc-item-status mod-([a-z]+)">([^<]+)<\/span>/g;
   let match: RegExpExecArray | null;
@@ -177,6 +192,111 @@ function extractEventCards(html: string, baseUrl: string): VlrEventCard[] {
   return cards;
 }
 
+export function parseVlrEventImport(
+  card: VlrEventCard,
+  html: string,
+  now: Date,
+): {
+  event?: ValorantSourceEvent;
+  compositions: CompositionRecord[];
+  matchPaths: string[];
+  warnings: string[];
+} {
+  const scope = inferScopeFromTitle(card.title);
+  if (!scope) {
+    return { compositions: [], matchPaths: [], warnings: [] };
+  }
+
+  const { startDate, endDate } = extractEventDatesFromPage(html);
+  const event: ValorantSourceEvent = {
+    id: card.id,
+    slug: card.slug,
+    title: card.title,
+    scope,
+    status: card.status,
+    sourceUrl: card.sourceUrl,
+    agentsUrl: card.agentsUrl,
+    startDate,
+    endDate,
+  };
+  const playedAt = resolveCompositionPlayedAt(event, now);
+  const compositionsById = new Map<string, CompositionRecord>();
+  const matchPaths = new Set<string>();
+  const warnings: string[] = [];
+  const mapBlocks = extractMapBlocks(html);
+
+  if (mapBlocks.length === 0 && card.status !== 'upcoming') {
+    warnings.push(`VLR-Agent-Matrix ohne Map-Blocks für ${card.title}`);
+  }
+
+  for (const mapBlock of mapBlocks) {
+    const mapKey = extractMapKey(mapBlock);
+    if (!mapKey) {
+      continue;
+    }
+
+    const headerAgentKeys = extractHeaderAgentKeys(mapBlock);
+    if (headerAgentKeys.length < 5) {
+      warnings.push(`Unerwartet wenige Agenten-Spalten auf ${card.title}/${mapKey}`);
+    }
+    const teamNameByGroupId = new Map<string, string>();
+
+    for (const row of extractTableRows(mapBlock)) {
+      if (!row.classes.includes('mod-dropdown')) {
+        const teamName = extractTeamName(row.content);
+        const groupId = extractParentGroupId(row.content);
+        if (teamName && groupId) {
+          teamNameByGroupId.set(groupId, teamName);
+        }
+        continue;
+      }
+
+      const groupId = extractDropdownGroupId(row.classes);
+      const teamName = groupId ? teamNameByGroupId.get(groupId) : undefined;
+      const won = extractRowResult(row.content);
+      const matchPath = extractMatchPath(row.content);
+      if (!groupId || !teamName || won === undefined || !matchPath) {
+        continue;
+      }
+
+      const agents = extractPickedAgents(row.content, headerAgentKeys, 'mod-picked-lite');
+      if (agents.length !== 5) {
+        continue;
+      }
+
+      matchPaths.add(normalizeMatchPath(matchPath));
+      const sourceUrl = new URL(matchPath, card.sourceUrl).toString();
+      const compositionId = [
+        'vlr',
+        card.id,
+        mapKey,
+        normalizeLookup(teamName),
+        normalizeLookup(matchPath),
+      ].join(':');
+
+      compositionsById.set(compositionId, {
+        id: compositionId,
+        matchPageTitle: matchPath,
+        mapName: mapKey,
+        teamName,
+        agents,
+        won,
+        playedAt,
+        scope,
+        sourceEventId: card.id,
+        sourceUrl,
+      });
+    }
+  }
+
+  return {
+    event,
+    compositions: [...compositionsById.values()],
+    matchPaths: [...matchPaths],
+    warnings,
+  };
+}
+
 function extractEventDatesFromPage(html: string): {
   startDate?: string;
   endDate?: string;
@@ -186,6 +306,11 @@ function extractEventDatesFromPage(html: string): {
   );
 
   return parseEventDateRange(match?.[1]);
+}
+
+function extractMatchTimestampFromPage(html: string): string | undefined {
+  const match = html.match(/data-utc-ts="([^"]+)"/i);
+  return parseUtcTimestamp(match?.[1]);
 }
 
 function extractMapBlocks(html: string): string[] {
@@ -259,6 +384,14 @@ function extractMatchPath(rowHtml: string): string | undefined {
   return match?.[1];
 }
 
+function normalizeMatchPath(pathOrUrl: string): string {
+  if (pathOrUrl.startsWith('http://') || pathOrUrl.startsWith('https://')) {
+    return new URL(pathOrUrl).pathname + new URL(pathOrUrl).search;
+  }
+
+  return pathOrUrl.startsWith('/') ? pathOrUrl : `/${pathOrUrl}`;
+}
+
 function extractRowResult(rowHtml: string): boolean | undefined {
   const match = rowHtml.match(/<td class="([^"]+)">/i);
   if (!match) {
@@ -311,6 +444,38 @@ function isWithinWindow(
   return comparisonTime >= cutoffTime;
 }
 
+function getPrioritizedUnresolvedPaths(
+  unresolvedPaths: string[],
+  compositions: CompositionRecord[],
+  now: Date,
+  recentDays: number,
+  maxLookups: number,
+): string[] {
+  const approximatePlayedAtByPath = new Map<string, string>();
+  const recentCutoff = new Date(now);
+  recentCutoff.setUTCDate(recentCutoff.getUTCDate() - recentDays);
+  const recentCutoffIso = recentCutoff.toISOString();
+
+  for (const composition of compositions) {
+    const normalizedPath = normalizeMatchPath(composition.matchPageTitle);
+    const currentValue = approximatePlayedAtByPath.get(normalizedPath);
+    if (!currentValue || composition.playedAt > currentValue) {
+      approximatePlayedAtByPath.set(normalizedPath, composition.playedAt);
+    }
+  }
+
+  const sortedPaths = unresolvedPaths
+    .slice()
+    .sort((left, right) =>
+      (approximatePlayedAtByPath.get(right) ?? '').localeCompare(approximatePlayedAtByPath.get(left) ?? '')
+        || left.localeCompare(right),
+    );
+  const recentPaths = sortedPaths.filter(path => (approximatePlayedAtByPath.get(path) ?? '') >= recentCutoffIso);
+  const olderPaths = sortedPaths.filter(path => (approximatePlayedAtByPath.get(path) ?? '') < recentCutoffIso);
+
+  return [...recentPaths, ...olderPaths].slice(0, maxLookups);
+}
+
 class VlrHttpClient {
   private readonly http: AxiosInstance;
   private nextRequestAt = 0;
@@ -361,7 +526,7 @@ export class VlrValorantCompositionProvider implements ValorantCompositionDataPr
     for (let page = 1; page <= this.options.maxEventPages; page += 1) {
       const path = page === 1 ? '/events' : `/events/?page=${page}`;
       const html = await this.client.fetchHtml(path);
-      const cards = extractEventCards(html, this.options.baseUrl);
+      const cards = extractVlrEventCards(html, this.options.baseUrl);
 
       for (const card of cards) {
         const scope = inferScopeFromTitle(card.title);
@@ -377,106 +542,52 @@ export class VlrValorantCompositionProvider implements ValorantCompositionDataPr
     return [...cardsById.values()];
   }
 
-  private parseEventImport(
-    card: VlrEventCard,
-    html: string,
-    now: Date,
-  ): {
-    event?: ValorantSourceEvent;
-    compositions: CompositionRecord[];
-  } {
-    const scope = inferScopeFromTitle(card.title);
-    if (!scope) {
-      return { compositions: [] };
-    }
+  private async resolveMissingMatchReferences(
+    cachedMatchReferenceByPath: Map<string, ValorantMatchReference>,
+    unresolvedPaths: string[],
+    warnings: string[],
+  ): Promise<Map<string, ValorantMatchReference>> {
+    const resolvedMatchReferenceByPath = new Map(cachedMatchReferenceByPath);
 
-    const { startDate, endDate } = extractEventDatesFromPage(html);
-    const event: ValorantSourceEvent = {
-      id: card.id,
-      slug: card.slug,
-      title: card.title,
-      scope,
-      status: card.status,
-      sourceUrl: card.sourceUrl,
-      agentsUrl: card.agentsUrl,
-      startDate,
-      endDate,
-    };
-    const playedAt = resolveCompositionPlayedAt(event, now);
-    const compositionsById = new Map<string, CompositionRecord>();
-
-    for (const mapBlock of extractMapBlocks(html)) {
-      const mapKey = extractMapKey(mapBlock);
-      if (!mapKey) {
-        continue;
-      }
-
-      const headerAgentKeys = extractHeaderAgentKeys(mapBlock);
-      const teamNameByGroupId = new Map<string, string>();
-
-      for (const row of extractTableRows(mapBlock)) {
-        if (!row.classes.includes('mod-dropdown')) {
-          const teamName = extractTeamName(row.content);
-          const groupId = extractParentGroupId(row.content);
-          if (teamName && groupId) {
-            teamNameByGroupId.set(groupId, teamName);
-          }
+    for (const path of unresolvedPaths) {
+      try {
+        const html = await this.client.fetchHtml(path);
+        const playedAt = extractMatchTimestampFromPage(html);
+        if (!playedAt) {
+          warnings.push(`Kein exakter Match-Zeitstempel gefunden für ${path}`);
           continue;
         }
 
-        const groupId = extractDropdownGroupId(row.classes);
-        const teamName = groupId ? teamNameByGroupId.get(groupId) : undefined;
-        const won = extractRowResult(row.content);
-        const matchPath = extractMatchPath(row.content);
-        if (!groupId || !teamName || won === undefined || !matchPath) {
-          continue;
-        }
-
-        const agents = extractPickedAgents(row.content, headerAgentKeys, 'mod-picked-lite');
-        if (agents.length !== 5) {
-          continue;
-        }
-
-        const sourceUrl = new URL(matchPath, this.options.baseUrl).toString();
-        const compositionId = [
-          'vlr',
-          card.id,
-          mapKey,
-          normalizeLookup(teamName),
-          normalizeLookup(matchPath),
-        ].join(':');
-
-        compositionsById.set(compositionId, {
-          id: compositionId,
-          matchPageTitle: matchPath,
-          mapName: mapKey,
-          teamName,
-          agents,
-          won,
+        resolvedMatchReferenceByPath.set(path, {
+          path,
           playedAt,
-          scope,
-          sourceEventId: card.id,
-          sourceUrl,
+          fetchedAt: new Date().toISOString(),
         });
+      } catch (error) {
+        warnings.push(`Match-Zeit für ${path} konnte nicht geladen werden`);
+        logger.warn({ error, path }, 'valorant match timestamp lookup failed');
       }
     }
 
-    return {
-      event,
-      compositions: [...compositionsById.values()],
-    };
+    return resolvedMatchReferenceByPath;
   }
 
   async importData(options: ValorantProviderImportOptions): Promise<ValorantProviderImportResult> {
     const cutoff = new Date(options.now);
     cutoff.setUTCDate(cutoff.getUTCDate() - options.windowDays);
     const cards = await this.discoverEventCards(options.now, options.windowDays);
+    const cachedMatchReferenceByPath = new Map(
+      options.existingMatchReferences.map(matchReference => [normalizeMatchPath(matchReference.path), matchReference]),
+    );
     const sourceEvents: ValorantSourceEvent[] = [];
     const compositions: CompositionRecord[] = [];
+    const warnings: string[] = [];
+    const usedMatchPaths = new Set<string>();
 
     for (const card of cards) {
       const html = await this.client.fetchHtml(card.agentsUrl);
-      const parsed = this.parseEventImport(card, html, options.now);
+      const parsed = parseVlrEventImport(card, html, options.now);
+      warnings.push(...parsed.warnings);
       if (
         !parsed.event
         || !isWithinWindow(parsed.event, options.now.getTime(), cutoff.getTime())
@@ -487,6 +598,46 @@ export class VlrValorantCompositionProvider implements ValorantCompositionDataPr
 
       sourceEvents.push(parsed.event);
       compositions.push(...parsed.compositions);
+      for (const matchPath of parsed.matchPaths) {
+        usedMatchPaths.add(matchPath);
+      }
+    }
+
+    const unresolvedPaths = [...usedMatchPaths].filter(path => !cachedMatchReferenceByPath.has(path));
+    const selectedUnresolvedPaths = getPrioritizedUnresolvedPaths(
+      unresolvedPaths,
+      compositions,
+      options.now,
+      this.options.recentMatchDays,
+      this.options.maxMatchTimestampLookups,
+    );
+    if (selectedUnresolvedPaths.length < unresolvedPaths.length) {
+      warnings.push(
+        `Exakte Match-Zeiten werden schrittweise nachgeladen (${selectedUnresolvedPaths.length}/${unresolvedPaths.length} in diesem Sync)`,
+      );
+    }
+    const resolvedMatchReferenceByPath = await this.resolveMissingMatchReferences(
+      cachedMatchReferenceByPath,
+      selectedUnresolvedPaths,
+      warnings,
+    );
+    const matchReferences = [...usedMatchPaths]
+      .map(path => resolvedMatchReferenceByPath.get(path))
+      .filter((matchReference): matchReference is ValorantMatchReference => Boolean(matchReference))
+      .sort((left, right) =>
+        right.playedAt.localeCompare(left.playedAt)
+          || left.path.localeCompare(right.path),
+      );
+    const playableStatusByEventId = new Map(sourceEvents.map(event => [event.id, event.status]));
+
+    for (const composition of compositions) {
+      const matchReference = resolvedMatchReferenceByPath.get(normalizeMatchPath(composition.matchPageTitle));
+      if (matchReference) {
+        composition.playedAt = matchReference.playedAt;
+      }
+      composition.eventStatus = composition.sourceEventId
+        ? playableStatusByEventId.get(composition.sourceEventId)
+        : composition.eventStatus;
     }
 
     logger.info({
@@ -494,16 +645,19 @@ export class VlrValorantCompositionProvider implements ValorantCompositionDataPr
       discoveredEvents: cards.length,
       importedEvents: sourceEvents.length,
       parsedCompositions: compositions.length,
+      warnings: warnings.length,
     }, 'valorant provider import completed');
 
     return {
       provider: this.name,
       sourceEvents,
+      matchReferences,
       compositions: compositions.sort((left, right) =>
         right.playedAt.localeCompare(left.playedAt)
           || left.mapName.localeCompare(right.mapName)
           || left.id.localeCompare(right.id),
       ),
+      warnings: [...new Set(warnings)].slice(0, 25),
     };
   }
 }

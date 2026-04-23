@@ -11,8 +11,10 @@ function createEmptyState(windowDays, provider) {
         version: 2,
         metadata: createEmptyMetadata(windowDays, provider),
         sourceEvents: [],
+        matchReferences: [],
         compositions: [],
         fullCompositionAggregates: [],
+        builderPresets: [],
         syncRuns: [],
     };
 }
@@ -36,6 +38,26 @@ function normalizeSourceEvents(sourceEvents) {
         && 'title' in event
         && 'scope' in event));
 }
+function normalizeMatchReferences(matchReferences) {
+    if (!Array.isArray(matchReferences)) {
+        return [];
+    }
+    return matchReferences.filter((matchReference) => Boolean(matchReference
+        && typeof matchReference === 'object'
+        && 'path' in matchReference
+        && 'playedAt' in matchReference
+        && 'fetchedAt' in matchReference));
+}
+function normalizeBuilderPresets(builderPresets) {
+    if (!Array.isArray(builderPresets)) {
+        return [];
+    }
+    return builderPresets.filter((preset) => Boolean(preset
+        && typeof preset === 'object'
+        && 'id' in preset
+        && 'userId' in preset
+        && 'name' in preset));
+}
 function migrateLegacyState(legacyState, windowDays, provider) {
     return {
         version: 2,
@@ -46,8 +68,10 @@ function migrateLegacyState(legacyState, windowDays, provider) {
             windowDays: legacyState.metadata?.windowDays ?? windowDays,
         },
         sourceEvents: [],
+        matchReferences: [],
         compositions: legacyState.compositions ?? [],
         fullCompositionAggregates: legacyState.fullCompositionAggregates ?? [],
+        builderPresets: [],
         syncRuns: [],
     };
 }
@@ -73,8 +97,10 @@ export class FileValorantRepository {
                     windowDays: parsed.metadata?.windowDays ?? this.options.windowDays,
                 },
                 sourceEvents: normalizeSourceEvents(parsed.sourceEvents),
+                matchReferences: normalizeMatchReferences(parsed.matchReferences),
                 compositions: parsed.compositions ?? [],
                 fullCompositionAggregates: parsed.fullCompositionAggregates ?? [],
+                builderPresets: normalizeBuilderPresets(parsed.builderPresets),
                 syncRuns: normalizeSyncRuns(parsed.syncRuns),
             };
         }
@@ -98,6 +124,8 @@ export class FileValorantRepository {
             nextScheduledSyncAt: state.metadata.nextScheduledSyncAt,
             lastAttemptedSyncAt: state.metadata.lastAttemptedSyncAt,
             lastSuccessfulSyncAt: state.metadata.lastSuccessfulSyncAt,
+            healthState: state.metadata.healthState ?? 'healthy',
+            healthReasons: state.metadata.healthReasons ?? [],
             lastError: state.metadata.lastError,
             importedEvents: state.sourceEvents.length,
             parsedCompositions: state.compositions.length,

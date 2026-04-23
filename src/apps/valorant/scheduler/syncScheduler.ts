@@ -1,9 +1,10 @@
-import type { ValorantStatusSnapshot, ValorantSyncResult } from '../domain/models.js';
+import type { ValorantAppState, ValorantStatusSnapshot, ValorantSyncResult } from '../domain/models.js';
 import { ValorantSyncService } from '../ingest/pipeline/syncService.js';
 import { FileValorantRepository } from '../storage/fileRepository.js';
 
 interface ValorantSyncSchedulerOptions {
   ingestHourUtc: number;
+  onSyncCompleted?: (result: ValorantSyncResult, previousState: ValorantAppState) => Promise<void>;
 }
 
 function getNextRunAt(ingestHourUtc: number, now = new Date()): Date {
@@ -45,9 +46,18 @@ export class ValorantSyncScheduler {
 
   private async runAndReschedule(trigger: 'startup' | 'scheduled' | 'manual'): Promise<ValorantSyncResult> {
     if (!this.runningPromise) {
-      this.runningPromise = this.syncService.runSync(trigger).finally(() => {
-        this.runningPromise = null;
-      });
+      const previousState = await this.repository.load();
+      this.runningPromise = this.syncService.runSync(trigger)
+        .then(async result => {
+          if (this.options.onSyncCompleted) {
+            await this.options.onSyncCompleted(result, previousState);
+          }
+
+          return result;
+        })
+        .finally(() => {
+          this.runningPromise = null;
+        });
     }
 
     try {
@@ -84,5 +94,9 @@ export class ValorantSyncScheduler {
       clearTimeout(this.timer);
       this.timer = null;
     }
+  }
+
+  setOnSyncCompleted(listener: ValorantSyncSchedulerOptions['onSyncCompleted']): void {
+    this.options.onSyncCompleted = listener;
   }
 }

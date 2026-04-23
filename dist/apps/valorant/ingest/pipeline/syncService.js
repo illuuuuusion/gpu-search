@@ -19,6 +19,24 @@ function formatSyncError(error) {
     }
     return String(error);
 }
+function buildHealthSnapshot(previousState, nextImportedEvents, nextParsedCompositions, warnings) {
+    const reasons = [];
+    const previousImportedEvents = previousState.sourceEvents.length;
+    const previousParsedCompositions = previousState.compositions.length;
+    if (previousImportedEvents >= 4
+        && nextImportedEvents < Math.max(2, Math.floor(previousImportedEvents * 0.7))) {
+        reasons.push(`Importierte Events stark gefallen: ${previousImportedEvents} -> ${nextImportedEvents}`);
+    }
+    if (previousParsedCompositions >= 100
+        && nextParsedCompositions < Math.max(50, Math.floor(previousParsedCompositions * 0.7))) {
+        reasons.push(`Geparste Comps stark gefallen: ${previousParsedCompositions} -> ${nextParsedCompositions}`);
+    }
+    reasons.push(...warnings.slice(0, 5));
+    return {
+        healthState: reasons.length > 0 ? 'degraded' : 'healthy',
+        healthReasons: reasons,
+    };
+}
 export class ValorantSyncService {
     repository;
     provider;
@@ -36,8 +54,10 @@ export class ValorantSyncService {
             const imported = await this.provider.importData({
                 now,
                 windowDays: this.options.windowDays,
+                existingMatchReferences: initialState.matchReferences,
             });
             const fullCompositionAggregates = buildFullCompositionAggregates(imported.compositions);
+            const health = buildHealthSnapshot(initialState, imported.sourceEvents.length, imported.compositions.length, imported.warnings);
             const completedRun = {
                 ...run,
                 finishedAt: new Date().toISOString(),
@@ -54,11 +74,15 @@ export class ValorantSyncService {
                     windowDays: this.options.windowDays,
                     lastAttemptedSyncAt: now.toISOString(),
                     lastSuccessfulSyncAt: now.toISOString(),
+                    healthState: health.healthState,
+                    healthReasons: health.healthReasons,
                     lastError: undefined,
                 },
                 sourceEvents: imported.sourceEvents,
+                matchReferences: imported.matchReferences,
                 compositions: imported.compositions,
                 fullCompositionAggregates,
+                builderPresets: initialState.builderPresets,
                 syncRuns: [
                     completedRun,
                     ...initialState.syncRuns,
@@ -71,6 +95,8 @@ export class ValorantSyncService {
                 importedEvents: imported.sourceEvents.length,
                 parsedCompositions: imported.compositions.length,
                 aggregatedFullComps: fullCompositionAggregates.length,
+                healthState: health.healthState,
+                healthReasons: health.healthReasons,
             }, 'valorant sync completed');
             return {
                 run: completedRun,
@@ -92,6 +118,8 @@ export class ValorantSyncService {
                     provider: this.options.provider,
                     windowDays: this.options.windowDays,
                     lastAttemptedSyncAt: now.toISOString(),
+                    healthState: initialState.metadata.healthState ?? 'healthy',
+                    healthReasons: initialState.metadata.healthReasons ?? [],
                     lastError: formattedError,
                 },
                 syncRuns: [
