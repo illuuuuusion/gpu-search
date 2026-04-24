@@ -39,7 +39,7 @@ const repairProfile = {
 };
 test('evaluateListing accepts targeted repair listings below total price cap', () => {
     const listing = buildListing({
-        title: 'GTX 1080 Ti defekt kein Bild',
+        title: 'GTX 1080 Ti defekt kein Bild startet noch',
         totalEur: 49.5,
         priceEur: 44.5,
         shippingEur: 5,
@@ -47,6 +47,8 @@ test('evaluateListing accepts targeted repair listings below total price cap', (
     const result = evaluateListing(repairProfile, listing);
     assert.equal(result.accepted, true);
     assert.equal(result.health, 'DEFECT');
+    assert.ok(result.repairability);
+    assert.ok((result.repairability?.score ?? 0) >= 70);
 });
 test('evaluateListing rejects working listings for repair-only profiles', () => {
     const listing = buildListing({
@@ -66,4 +68,14 @@ test('evaluateListing enforces total-price cap including shipping for repair lis
     const result = evaluateListing(repairProfile, listing);
     assert.equal(result.accepted, false);
     assert.match(result.reasons.join(' '), /price_above_limit_or_auction_not_soon/);
+});
+test('evaluateListing gives low repairability scores to severe physical damage', () => {
+    const listing = buildListing({
+        title: 'GTX 1080 Ti defekt',
+        description: 'PCB gebrochen, ohne Chip, verbrannt, nur fuer Teile.',
+    });
+    const result = evaluateListing(repairProfile, listing);
+    assert.ok(result.repairability);
+    assert.ok((result.repairability?.score ?? 100) <= 10);
+    assert.match((result.repairability?.reasons ?? []).join(' '), /missing_core_parts/);
 });

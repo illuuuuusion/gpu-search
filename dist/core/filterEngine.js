@@ -1,5 +1,6 @@
 import { defectTerms, exclusionTerms } from '../config/exclusionTerms.js';
 import { env } from '../config/env.js';
+import { assessRepairability } from './repairabilityScore.js';
 import { buildListingSearchText, getListingTextSources } from './listingSignals.js';
 const allowedCountries = new Set(env.ALLOW_COUNTRIES.split(',').map(v => v.trim().toUpperCase()));
 const accessoryPatterns = [
@@ -229,6 +230,9 @@ export function evaluateListing(profile, listing, referenceMatch, options = {}) 
     const accepted = acceptedForOfferType(offerType, listing, priceEvaluation.effectiveLimitEur);
     if (!accepted)
         reasons.push('price_above_limit_or_auction_not_soon');
+    const repairability = healthResult.health === 'DEFECT'
+        ? assessRepairability(listing)
+        : undefined;
     return {
         profile,
         listing,
@@ -242,5 +246,6 @@ export function evaluateListing(profile, listing, referenceMatch, options = {}) 
         limitHeadroomPercent: priceEvaluation.limitHeadroomPercent,
         referenceMatch,
         retailDiscountPercent: priceEvaluation.retailDiscountPercent,
+        repairability,
     };
 }

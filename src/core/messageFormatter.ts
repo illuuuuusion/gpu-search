@@ -44,6 +44,14 @@ export function formatListingMessage(result: EvaluatedListing): AlertMessage {
     fields.push({ name: 'GPU-Merkmal', value: result.listing.gpuModel, inline: true });
   }
 
+  if (result.repairability) {
+    fields.push(
+      { name: 'Repair-Score', value: `${result.repairability.score}/100`, inline: true },
+      { name: 'Repair-Confidence', value: result.repairability.confidence, inline: true },
+      { name: 'Repair-Hinweise', value: result.repairability.reasons.slice(0, 4).join(', '), inline: false },
+    );
+  }
+
   if (result.referenceMatch) {
     const referenceLabel = result.referenceMatch.reference.source === 'override'
       ? 'Fallback-Referenz'

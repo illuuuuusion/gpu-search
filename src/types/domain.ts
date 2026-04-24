@@ -139,6 +139,12 @@ export interface MarketDigestMessage {
   topProfiles: MarketDigestTopProfile[];
 }
 
+export interface RepairabilityAssessment {
+  score: number;
+  confidence: 'low' | 'medium' | 'high';
+  reasons: string[];
+}
+
 export interface EbayListing {
   id: string;
   title: string;
@@ -179,6 +185,7 @@ export interface EvaluatedListing {
   limitHeadroomPercent: number;
   referenceMatch?: MarketReferenceMatch;
   retailDiscountPercent?: number;
+  repairability?: RepairabilityAssessment;
   marketStats?: ProfileMarketStats;
 }
 
