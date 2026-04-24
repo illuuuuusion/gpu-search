@@ -8,8 +8,9 @@ async function main(): Promise<void> {
   const statePath = env.SCANNER_STATE_PATH ?? DEFAULT_STATE_PATH;
   await fs.mkdir(path.dirname(statePath), { recursive: true });
   await fs.writeFile(statePath, JSON.stringify({
-    version: 2,
+    version: 3,
     updatedAt: new Date().toISOString(),
+    metadata: {},
     seen: [],
     observations: [],
   }, null, 2));
