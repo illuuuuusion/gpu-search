@@ -1,3 +1,5 @@
+import type { MarketDigestMessage } from '../types/domain.js';
+
 export interface AlertField {
   name: string;
   value: string;
@@ -51,6 +53,7 @@ export interface Notifier {
   send(message: AlertMessage): Promise<NotificationReceipt | void>;
   sendScanStatus?(message: ScanStatusMessage): Promise<void>;
   sendValorantSyncStatus?(message: ValorantSyncStatusMessage): Promise<void>;
+  sendMarketDigest?(message: MarketDigestMessage): Promise<void>;
   delete?(receipt: NotificationReceipt): Promise<void>;
 }
 
@@ -78,6 +81,15 @@ export class ConsoleNotifier implements Notifier {
   async sendValorantSyncStatus(message: ValorantSyncStatusMessage): Promise<void> {
     console.log(
       `[valorant-sync] trigger=${message.trigger} provider=${message.provider} health=${message.healthState} events=${message.importedEvents} comps=${message.parsedCompositions} full_comps=${message.aggregatedFullComps} meta=${message.metaChanges.join(' | ')}`,
+    );
+  }
+
+  async sendMarketDigest(message: MarketDigestMessage): Promise<void> {
+    const topProfiles = message.topProfiles
+      .map(profile => `${profile.profileName}(${profile.acceptedCount}, avg=${profile.averageTotalPriceEur?.toFixed(2) ?? 'n/a'}€)`)
+      .join(' | ');
+    console.log(
+      `[market-digest] cadence=${message.cadence} accepted=${message.totalAcceptedListings} working=${message.totalWorkingListings} defect=${message.totalDefectListings} snapshot=${message.snapshotPath} top=${topProfiles}`,
     );
   }
 

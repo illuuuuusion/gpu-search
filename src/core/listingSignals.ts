@@ -59,6 +59,10 @@ export function compactComparableText(value: string): string {
   return normalizeComparableText(value).replace(/\s+/g, '');
 }
 
+export function normalizeListingText(value: string): string {
+  return normalizeComparableText(value);
+}
+
 function uniqueTexts(values: Array<string | undefined>): string[] {
   const deduped = new Map<string, string>();
 
@@ -112,6 +116,41 @@ function detectGpuModel(texts: Array<string | undefined>): string | undefined {
       const match = text.match(pattern)?.[0]?.replace(/\s+/g, ' ').trim();
       if (match) {
         return match.toUpperCase().replace(/\bXt\b/g, 'XT').replace(/\bXtx\b/g, 'XTX');
+      }
+    }
+  }
+
+  return undefined;
+}
+
+export function detectListingVramGb(listing: Pick<EbayListing, 'title' | 'subtitle' | 'shortDescription' | 'description' | 'boardModel' | 'gpuModel' | 'aspects'>): number | undefined {
+  const texts = [
+    listing.title,
+    listing.subtitle,
+    listing.shortDescription,
+    listing.description,
+    listing.boardModel,
+    listing.gpuModel,
+    ...listing.aspects.map(aspect => `${aspect.name} ${aspect.value}`),
+  ].filter((value): value is string => Boolean(value?.trim()));
+
+  for (const text of texts) {
+    const normalized = normalizeComparableText(text);
+    const explicitGb = normalized.match(/\b(\d{1,2})\s*(?:gb|gddr\d+\s*(\d{1,2})\s*gb?)\b/i);
+    if (explicitGb) {
+      const direct = explicitGb[1] ?? explicitGb[2];
+      const parsed = Number(direct);
+      if (Number.isFinite(parsed) && parsed >= 2 && parsed <= 64) {
+        return parsed;
+      }
+    }
+
+    const compact = normalized.replace(/\s+/g, '');
+    const compactMatch = compact.match(/\b(\d{1,2})gb\b/i);
+    if (compactMatch) {
+      const parsed = Number(compactMatch[1]);
+      if (Number.isFinite(parsed) && parsed >= 2 && parsed <= 64) {
+        return parsed;
       }
     }
   }

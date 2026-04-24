@@ -65,13 +65,37 @@ export class ScannerService {
         }
         return removalCount;
     }
-    async resetState() {
+    async resetState(profiles) {
         await this.ensureInitialized();
         if (this.currentRunPromise) {
             await this.currentRunPromise;
         }
         this.bucketWatermarks.clear();
-        return this.state.reset();
+        const result = await this.state.reset();
+        if (profiles) {
+            await this.exportMarketDashboard(profiles);
+        }
+        return result;
+    }
+    async exportMarketDashboard(profiles) {
+        await this.ensureInitialized();
+        return this.state.persistMarketDashboardSnapshot(profiles);
+    }
+    async maybeCreateMarketDigest(profiles, cadence) {
+        await this.ensureInitialized();
+        if (!this.state.shouldSendDigest(cadence)) {
+            return null;
+        }
+        const digest = this.state.buildMarketDigest(profiles, cadence);
+        if (digest.totalAcceptedListings === 0) {
+            await this.state.markDigestSent(cadence, digest.generatedAt);
+            return null;
+        }
+        return digest;
+    }
+    async markMarketDigestSent(cadence, sentAt = new Date().toISOString()) {
+        await this.ensureInitialized();
+        await this.state.markDigestSent(cadence, sentAt);
     }
     async runOnce(profiles, options = {}) {
         if (this.isRunning) {
@@ -198,6 +222,14 @@ export class ScannerService {
             const availabilityRemovals = runAvailabilityCleanup
                 ? await this.cleanupUnavailableListings()
                 : 0;
+            if (persistState) {
+                try {
+                    await this.exportMarketDashboard(profiles);
+                }
+                catch (error) {
+                    logger.warn({ error }, 'Failed to persist market dashboard snapshot');
+                }
+            }
             return {
                 uniqueListings: collectedListings.size,
                 acceptedListings,

@@ -1,5 +1,11 @@
 export const searchBuckets = [
     {
+        id: 'repair-legacy',
+        name: 'Repair Legacy GPUs',
+        query: '(gtx 970, gtx 980, gtx 980 ti, gtx 1070 ti, gtx 1080 ti, rx 580, rx 590) (defekt, bastler, kein bild, artefakte)',
+        profileMatchers: ['repair /'],
+    },
+    {
         id: 'nvidia-legacy',
         name: 'NVIDIA Legacy',
         query: 'RTX (2080, 2080 super, 2080 ti, titan)',

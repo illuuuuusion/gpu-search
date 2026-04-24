@@ -73,6 +73,20 @@ export class ValorantModule {
             });
         });
     }
+    getNotifierBindings() {
+        return {
+            onValorantStatusRequested: async () => this.getStatus(),
+            onValorantSyncRequested: async () => this.triggerManualSync(),
+            onValorantHelpRequested: async () => this.getHelpText(),
+            onValorantTopRequested: async (input) => this.getTopCompositionsText(input),
+            onValorantAgentRequested: async (input) => this.getAgentText(input),
+            onValorantMapMetaRequested: async (input) => this.getMapMetaText(input),
+            onValorantEventsRequested: async (input) => this.getEventsText(input),
+            onValorantTeamRequested: async (input) => this.getTeamText(input),
+            onValorantCompBuilderStart: async (userId, options) => this.startCompBuilder(userId, options),
+            onValorantCompBuilderAction: async (input) => this.handleCompBuilderAction(input.userId, input.sessionId, input.action),
+        };
+    }
     async getHelpText() {
         return this.insights.getHelpText();
     }

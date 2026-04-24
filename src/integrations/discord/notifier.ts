@@ -40,6 +40,8 @@ import type {
   ScanStatusSummary,
   ValorantSyncStatusMessage,
 } from '../notifier.js';
+import type { MarketDigestMessage } from '../../types/domain.js';
+import type { BotCommandBindings, ScanCommandResult } from '../botBindings.js';
 import { logger } from '../../utils/logger.js';
 
 const DISCORD_ACTIVITY_NAME = 'eBay GPU-Deals';
@@ -62,107 +64,14 @@ const COMP_BUILDER_PREFIX = 'vct-comp';
 const COMP_BUILDER_PRESET_MODAL_PREFIX = 'vct-comp-preset';
 const ALERT_FOOTER_TEXT = 'GPU-Search';
 const AUTOMATIC_SCAN_STATUS_FOOTER_TEXT = 'GPU-Search • Auto-Scan-Status';
+const MARKET_DIGEST_FOOTER_TEXT = 'GPU-Search • Markt-Zusammenfassung';
 const VALORANT_SYNC_FOOTER_TEXT = 'GPU-Search • VALORANT Meta Update';
 const DISCORD_ADMIN_USER_IDS = new Set([
   '504707482547912714',
   '689513442867937321',
 ]);
 
-interface ScanCommandResult {
-  status: 'completed' | 'queued_after_running_scan';
-  nextAutomaticScanAt: string;
-  summary: ScanStatusSummary;
-}
-
-interface DiscordNotifierOptions {
-  onScannerStateReset?: () => Promise<{ seenCount: number; observationCount: number }>;
-  onManualScanRequested?: () => Promise<ScanCommandResult>;
-  onForceRescanRequested?: () => Promise<ScanCommandResult>;
-  onDebugScanRequested?: () => Promise<ScanCommandResult>;
-  onScanInfoRequested?: () => Promise<{ nextAutomaticScanAt?: string; scanRunning: boolean }>;
-  onValorantStatusRequested?: () => Promise<{
-    enabled: boolean;
-    syncRunning: boolean;
-    provider: ValorantCompositionProvider;
-    nextScheduledSyncAt?: string;
-    lastAttemptedSyncAt?: string;
-    lastSuccessfulSyncAt?: string;
-    healthState: 'healthy' | 'degraded';
-    healthReasons: string[];
-    lastError?: string;
-    importedEvents: number;
-    parsedCompositions: number;
-    aggregatedFullComps: number;
-  }>;
-  onValorantSyncRequested?: () => Promise<{
-    run: {
-      status: 'running' | 'success' | 'failed';
-      provider: ValorantCompositionProvider;
-      importedEvents: number;
-      parsedCompositions: number;
-      aggregatedFullComps: number;
-      error?: string;
-    };
-    state: {
-      metadata: {
-        provider: ValorantCompositionProvider;
-        lastSuccessfulSyncAt?: string;
-        lastError?: string;
-      };
-    };
-  }>;
-  onValorantHelpRequested?: () => Promise<string>;
-  onValorantTopRequested?: (input: {
-    mapQuery: string;
-    scope?: ValorantTournamentScope;
-    eventQuery?: string;
-    eventStatus?: ValorantSourceEventStatus;
-    days?: number;
-    teamQuery?: string;
-  }) => Promise<string>;
-  onValorantAgentRequested?: (input: {
-    agentQuery: string;
-    scope?: ValorantTournamentScope;
-    eventQuery?: string;
-    eventStatus?: ValorantSourceEventStatus;
-    days?: number;
-    teamQuery?: string;
-  }) => Promise<string>;
-  onValorantMapMetaRequested?: (input: {
-    mapQuery: string;
-    scope?: ValorantTournamentScope;
-    eventQuery?: string;
-    eventStatus?: ValorantSourceEventStatus;
-    days?: number;
-    teamQuery?: string;
-  }) => Promise<string>;
-  onValorantEventsRequested?: (input: {
-    scope?: ValorantTournamentScope;
-    eventQuery?: string;
-    eventStatus?: ValorantSourceEventStatus;
-    days?: number;
-    teamQuery?: string;
-  }) => Promise<string>;
-  onValorantTeamRequested?: (input: {
-    teamQuery: string;
-    scope?: ValorantTournamentScope;
-    eventQuery?: string;
-    eventStatus?: ValorantSourceEventStatus;
-    days?: number;
-  }) => Promise<string>;
-  onValorantCompBuilderStart?: (userId: string, options: {
-    scope?: ValorantTournamentScope;
-    eventQuery?: string;
-    eventStatus?: ValorantSourceEventStatus;
-    days?: number;
-    teamQuery?: string;
-  }) => Promise<CompBuilderSnapshot>;
-  onValorantCompBuilderAction?: (input: {
-    userId: string;
-    sessionId: string;
-    action: CompBuilderAction;
-  }) => Promise<CompBuilderSnapshot | null>;
-}
+export type DiscordNotifierOptions = BotCommandBindings;
 
 function toDiscordColor(color: AlertMessage['color']): number {
   return color === 'danger' ? 0xED4245 : 0x57F287;
@@ -855,6 +764,19 @@ export class DiscordNotifier implements Notifier {
     this.nextSendAt = Date.now() + env.DISCORD_SEND_DELAY_MS;
   }
 
+  async sendMarketDigest(message: MarketDigestMessage): Promise<void> {
+    await this.start();
+    await this.waitForSendWindow();
+
+    const channel = await this.fetchMessageChannel();
+    await channel.send({
+      embeds: [this.buildMarketDigestEmbed(message)],
+      allowedMentions: { parse: [] },
+    });
+
+    this.nextSendAt = Date.now() + env.DISCORD_SEND_DELAY_MS;
+  }
+
   async delete(receipt: NotificationReceipt): Promise<void> {
     if (!receipt.messageId) {
       return;
@@ -949,6 +871,37 @@ export class DiscordNotifier implements Notifier {
       embed.addFields({
         name: 'Health-Hinweise',
         value: message.healthReasons.join('\n'),
+      });
+    }
+
+    return embed;
+  }
+
+  private buildMarketDigestEmbed(message: MarketDigestMessage): EmbedBuilder {
+    const cadenceLabel = message.cadence === 'weekly' ? 'Wöchentliche' : 'Tägliche';
+    const embed = new EmbedBuilder()
+      .setColor(0x5865F2)
+      .setTitle(`${cadenceLabel} Markt-Zusammenfassung`)
+      .setDescription([
+        `Zeitraum: ${formatDiscordTimestamp(message.periodStart)} bis ${formatDiscordTimestamp(message.periodEnd)}`,
+        `Akzeptierte Treffer: ${message.totalAcceptedListings}`,
+        `Funktionsfähig: ${message.totalWorkingListings}`,
+        `Defekt: ${message.totalDefectListings}`,
+        `Snapshot JSON: \`${message.snapshotPath}\``,
+      ].join('\n'))
+      .setFooter({ text: MARKET_DIGEST_FOOTER_TEXT });
+
+    if (message.topProfiles.length > 0) {
+      embed.addFields({
+        name: 'Top-Profile',
+        value: message.topProfiles
+          .map((profile: MarketDigestMessage['topProfiles'][number]) => {
+            const avgPrice = profile.averageTotalPriceEur !== undefined
+              ? `${profile.averageTotalPriceEur.toFixed(2)} €`
+              : 'n/a';
+            return `${profile.profileName}: ${profile.acceptedCount} Treffer | Ø ${avgPrice} | Score ${profile.averageScore.toFixed(2)}`;
+          })
+          .join('\n'),
       });
     }
 

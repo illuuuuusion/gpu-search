@@ -54,6 +54,9 @@ function normalizeComparableText(value) {
 export function compactComparableText(value) {
     return normalizeComparableText(value).replace(/\s+/g, '');
 }
+export function normalizeListingText(value) {
+    return normalizeComparableText(value);
+}
 function uniqueTexts(values) {
     const deduped = new Map();
     for (const value of values) {
@@ -99,6 +102,37 @@ function detectGpuModel(texts) {
             const match = text.match(pattern)?.[0]?.replace(/\s+/g, ' ').trim();
             if (match) {
                 return match.toUpperCase().replace(/\bXt\b/g, 'XT').replace(/\bXtx\b/g, 'XTX');
+            }
+        }
+    }
+    return undefined;
+}
+export function detectListingVramGb(listing) {
+    const texts = [
+        listing.title,
+        listing.subtitle,
+        listing.shortDescription,
+        listing.description,
+        listing.boardModel,
+        listing.gpuModel,
+        ...listing.aspects.map(aspect => `${aspect.name} ${aspect.value}`),
+    ].filter((value) => Boolean(value?.trim()));
+    for (const text of texts) {
+        const normalized = normalizeComparableText(text);
+        const explicitGb = normalized.match(/\b(\d{1,2})\s*(?:gb|gddr\d+\s*(\d{1,2})\s*gb?)\b/i);
+        if (explicitGb) {
+            const direct = explicitGb[1] ?? explicitGb[2];
+            const parsed = Number(direct);
+            if (Number.isFinite(parsed) && parsed >= 2 && parsed <= 64) {
+                return parsed;
+            }
+        }
+        const compact = normalized.replace(/\s+/g, '');
+        const compactMatch = compact.match(/\b(\d{1,2})gb\b/i);
+        if (compactMatch) {
+            const parsed = Number(compactMatch[1]);
+            if (Number.isFinite(parsed) && parsed >= 2 && parsed <= 64) {
+                return parsed;
             }
         }
     }

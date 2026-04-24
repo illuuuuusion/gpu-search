@@ -20,6 +20,7 @@ const profileSchema: z.ZodType<GpuProfile> = z.object({
   negativeAliases: z.array(z.string()),
   vramGb: z.number(),
   category: z.string(),
+  targetHealth: z.enum(['ANY', 'WORKING', 'DEFECT']).optional(),
   vramVariants: z.boolean(),
   excludeNew: z.boolean(),
   onlyGermany: z.boolean(),

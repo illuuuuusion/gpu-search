@@ -43,6 +43,7 @@ const envSchema = z.object({
   DISCORD_RATE_LIMIT_BUFFER_MS: z.coerce.number().default(250),
   DISCORD_MAX_SEND_RETRIES: z.coerce.number().default(5),
   SCANNER_STATE_PATH: optionalString,
+  MARKET_SUMMARY_PATH: optionalString,
   SCANNER_SEEN_RETENTION_DAYS: z.coerce.number().default(30),
   SCANNER_STATS_WINDOW_DAYS: z.coerce.number().default(90),
   SCANNER_AVAILABILITY_RECHECK_HOURS: z.coerce.number().default(6),
@@ -100,6 +101,7 @@ interface AppEnv {
   DISCORD_RATE_LIMIT_BUFFER_MS: number;
   DISCORD_MAX_SEND_RETRIES: number;
   SCANNER_STATE_PATH?: string;
+  MARKET_SUMMARY_PATH?: string;
   SCANNER_SEEN_RETENTION_DAYS: number;
   SCANNER_STATS_WINDOW_DAYS: number;
   SCANNER_AVAILABILITY_RECHECK_HOURS: number;

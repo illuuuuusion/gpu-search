@@ -14,6 +14,7 @@ export interface GpuProfile {
   negativeAliases: string[];
   vramGb: number;
   category: string;
+  targetHealth?: 'ANY' | 'WORKING' | 'DEFECT';
   vramVariants: boolean;
   excludeNew: boolean;
   onlyGermany: boolean;
@@ -71,6 +72,71 @@ export interface ProfileMarketStats {
   defectCount: number;
   averageDefectPriceEur?: number;
   lastObservedAt?: string;
+}
+
+export interface MarketChartPoint {
+  bucketStart: string;
+  bucketEnd: string;
+  label: string;
+  acceptedCount: number;
+  workingCount: number;
+  defectCount: number;
+  averageTotalPriceEur?: number;
+  averageWorkingPriceEur?: number;
+  averageDefectPriceEur?: number;
+  averageScore: number;
+  minTotalPriceEur?: number;
+  maxTotalPriceEur?: number;
+}
+
+export interface MarketBarDatum {
+  key: string;
+  label: string;
+  value: number;
+}
+
+export interface ProfileMarketSnapshot extends ProfileMarketStats {
+  category: string;
+  targetHealth?: 'ANY' | 'WORKING' | 'DEFECT';
+  charts: {
+    daily: MarketChartPoint[];
+    weekly: MarketChartPoint[];
+  };
+}
+
+export interface MarketDashboardSnapshot {
+  generatedAt: string;
+  windowDays: number;
+  snapshotPath: string;
+  profiles: ProfileMarketSnapshot[];
+  barCharts: {
+    acceptedCountByProfile: MarketBarDatum[];
+    averageWorkingPriceByProfile: MarketBarDatum[];
+    averageDefectPriceByProfile: MarketBarDatum[];
+    averageScoreByProfile: MarketBarDatum[];
+  };
+}
+
+export interface MarketDigestTopProfile {
+  profileName: string;
+  category: string;
+  acceptedCount: number;
+  workingCount: number;
+  defectCount: number;
+  averageTotalPriceEur?: number;
+  averageScore: number;
+}
+
+export interface MarketDigestMessage {
+  cadence: 'daily' | 'weekly';
+  generatedAt: string;
+  periodStart: string;
+  periodEnd: string;
+  totalAcceptedListings: number;
+  totalWorkingListings: number;
+  totalDefectListings: number;
+  snapshotPath: string;
+  topProfiles: MarketDigestTopProfile[];
 }
 
 export interface EbayListing {

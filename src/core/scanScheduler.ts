@@ -28,6 +28,15 @@ export class ScanScheduler {
     this.scheduleNextAutomaticScan(Date.now() + this.pollIntervalMs);
   }
 
+  stop(): void {
+    if (this.nextAutomaticScanTimer) {
+      clearTimeout(this.nextAutomaticScanTimer);
+      this.nextAutomaticScanTimer = null;
+    }
+
+    this.nextAutomaticScanAtMs = null;
+  }
+
   async triggerManualScan(): Promise<ManualScanTriggerResult> {
     return this.triggerScan({ forceRescan: false });
   }
@@ -104,6 +113,21 @@ export class ScanScheduler {
         }).catch(error => {
           logger.warn({ error }, 'failed to send automatic scan finished status');
         });
+      }
+      if (this.notifier?.sendMarketDigest) {
+        for (const cadence of ['daily', 'weekly'] as const) {
+          try {
+            const digest = await this.scanner.maybeCreateMarketDigest(this.profiles, cadence);
+            if (!digest) {
+              continue;
+            }
+
+            await this.notifier.sendMarketDigest(digest);
+            await this.scanner.markMarketDigestSent(cadence, digest.generatedAt);
+          } catch (error) {
+            logger.warn({ error, cadence }, 'failed to send market digest');
+          }
+        }
       }
     } catch (error) {
       logger.error({ error }, 'scan failed');

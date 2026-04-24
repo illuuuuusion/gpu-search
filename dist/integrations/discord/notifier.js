@@ -22,6 +22,7 @@ const COMP_BUILDER_PREFIX = 'vct-comp';
 const COMP_BUILDER_PRESET_MODAL_PREFIX = 'vct-comp-preset';
 const ALERT_FOOTER_TEXT = 'GPU-Search';
 const AUTOMATIC_SCAN_STATUS_FOOTER_TEXT = 'GPU-Search • Auto-Scan-Status';
+const MARKET_DIGEST_FOOTER_TEXT = 'GPU-Search • Markt-Zusammenfassung';
 const VALORANT_SYNC_FOOTER_TEXT = 'GPU-Search • VALORANT Meta Update';
 const DISCORD_ADMIN_USER_IDS = new Set([
     '504707482547912714',
@@ -567,6 +568,16 @@ export class DiscordNotifier {
         });
         this.nextSendAt = Date.now() + env.DISCORD_SEND_DELAY_MS;
     }
+    async sendMarketDigest(message) {
+        await this.start();
+        await this.waitForSendWindow();
+        const channel = await this.fetchMessageChannel();
+        await channel.send({
+            embeds: [this.buildMarketDigestEmbed(message)],
+            allowedMentions: { parse: [] },
+        });
+        this.nextSendAt = Date.now() + env.DISCORD_SEND_DELAY_MS;
+    }
     async delete(receipt) {
         if (!receipt.messageId) {
             return;
@@ -642,6 +653,34 @@ export class DiscordNotifier {
             embed.addFields({
                 name: 'Health-Hinweise',
                 value: message.healthReasons.join('\n'),
+            });
+        }
+        return embed;
+    }
+    buildMarketDigestEmbed(message) {
+        const cadenceLabel = message.cadence === 'weekly' ? 'Wöchentliche' : 'Tägliche';
+        const embed = new EmbedBuilder()
+            .setColor(0x5865F2)
+            .setTitle(`${cadenceLabel} Markt-Zusammenfassung`)
+            .setDescription([
+            `Zeitraum: ${formatDiscordTimestamp(message.periodStart)} bis ${formatDiscordTimestamp(message.periodEnd)}`,
+            `Akzeptierte Treffer: ${message.totalAcceptedListings}`,
+            `Funktionsfähig: ${message.totalWorkingListings}`,
+            `Defekt: ${message.totalDefectListings}`,
+            `Snapshot JSON: \`${message.snapshotPath}\``,
+        ].join('\n'))
+            .setFooter({ text: MARKET_DIGEST_FOOTER_TEXT });
+        if (message.topProfiles.length > 0) {
+            embed.addFields({
+                name: 'Top-Profile',
+                value: message.topProfiles
+                    .map((profile) => {
+                    const avgPrice = profile.averageTotalPriceEur !== undefined
+                        ? `${profile.averageTotalPriceEur.toFixed(2)} €`
+                        : 'n/a';
+                    return `${profile.profileName}: ${profile.acceptedCount} Treffer | Ø ${avgPrice} | Score ${profile.averageScore.toFixed(2)}`;
+                })
+                    .join('\n'),
             });
         }
         return embed;

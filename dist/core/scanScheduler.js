@@ -18,6 +18,13 @@ export class ScanScheduler {
         await this.runScan();
         this.scheduleNextAutomaticScan(Date.now() + this.pollIntervalMs);
     }
+    stop() {
+        if (this.nextAutomaticScanTimer) {
+            clearTimeout(this.nextAutomaticScanTimer);
+            this.nextAutomaticScanTimer = null;
+        }
+        this.nextAutomaticScanAtMs = null;
+    }
     async triggerManualScan() {
         return this.triggerScan({ forceRescan: false });
     }
@@ -83,6 +90,21 @@ export class ScanScheduler {
                 }).catch(error => {
                     logger.warn({ error }, 'failed to send automatic scan finished status');
                 });
+            }
+            if (this.notifier?.sendMarketDigest) {
+                for (const cadence of ['daily', 'weekly']) {
+                    try {
+                        const digest = await this.scanner.maybeCreateMarketDigest(this.profiles, cadence);
+                        if (!digest) {
+                            continue;
+                        }
+                        await this.notifier.sendMarketDigest(digest);
+                        await this.scanner.markMarketDigestSent(cadence, digest.generatedAt);
+                    }
+                    catch (error) {
+                        logger.warn({ error, cadence }, 'failed to send market digest');
+                    }
+                }
             }
         }
         catch (error) {

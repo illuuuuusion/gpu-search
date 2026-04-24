@@ -8,6 +8,7 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
+    "test": "EBAY_PROVIDER=mock SCANNER_STATE_PATH=/tmp/gpu-search-test-scanner-state.json MARKET_SUMMARY_PATH=/tmp/gpu-search-test-market-summary.json npm run build && EBAY_PROVIDER=mock SCANNER_STATE_PATH=/tmp/gpu-search-test-scanner-state.json MARKET_SUMMARY_PATH=/tmp/gpu-search-test-market-summary.json node --test dist/**/*.test.js",
     "refresh:references": "node dist/scripts/refreshReferences.js",
     "reset:scanner-state": "node dist/scripts/resetScannerState.js",
     "test:mock-scan": "node dist/scripts/testMockScan.js",

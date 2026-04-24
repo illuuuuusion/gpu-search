@@ -264,6 +264,17 @@ export function evaluateListing(
     return rejectedResult(profile, listing, healthResult.health, reasons);
   }
 
+  const targetHealth = profile.targetHealth ?? 'ANY';
+  if (targetHealth === 'DEFECT' && healthResult.health !== 'DEFECT') {
+    reasons.push(`health_mismatch=${healthResult.health.toLowerCase()}`);
+    return rejectedResult(profile, listing, 'EXCLUDED', reasons);
+  }
+
+  if (targetHealth === 'WORKING' && healthResult.health !== 'WORKING') {
+    reasons.push(`health_mismatch=${healthResult.health.toLowerCase()}`);
+    return rejectedResult(profile, listing, 'EXCLUDED', reasons);
+  }
+
   const accessoryHit = accessoryReason(buildListingSearchText(listing));
   if (accessoryHit) {
     reasons.push(accessoryHit);

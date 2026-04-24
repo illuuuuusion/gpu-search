@@ -19,6 +19,12 @@ export class ConsoleNotifier {
     async sendValorantSyncStatus(message) {
         console.log(`[valorant-sync] trigger=${message.trigger} provider=${message.provider} health=${message.healthState} events=${message.importedEvents} comps=${message.parsedCompositions} full_comps=${message.aggregatedFullComps} meta=${message.metaChanges.join(' | ')}`);
     }
+    async sendMarketDigest(message) {
+        const topProfiles = message.topProfiles
+            .map(profile => `${profile.profileName}(${profile.acceptedCount}, avg=${profile.averageTotalPriceEur?.toFixed(2) ?? 'n/a'}€)`)
+            .join(' | ');
+        console.log(`[market-digest] cadence=${message.cadence} accepted=${message.totalAcceptedListings} working=${message.totalWorkingListings} defect=${message.totalDefectListings} snapshot=${message.snapshotPath} top=${topProfiles}`);
+    }
     async delete() {
         // Console alerts are ephemeral; nothing to delete.
     }

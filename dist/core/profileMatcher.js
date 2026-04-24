@@ -1,17 +1,32 @@
-import { buildListingSearchText, compactComparableText } from './listingSignals.js';
+import { buildListingSearchText, compactComparableText, detectListingVramGb, normalizeListingText } from './listingSignals.js';
 function normalizeText(value) {
-    return value
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, ' ')
-        .trim()
-        .replace(/\s+/g, ' ');
+    return normalizeListingText(value);
+}
+function aliasCandidates(alias) {
+    const normalized = normalizeText(alias);
+    if (!normalized)
+        return [];
+    const candidates = new Set([
+        normalized,
+        normalized.replace(/\bgeforce\b/g, '').trim(),
+        normalized.replace(/\bradeon\b/g, '').trim(),
+        normalized.replace(/\bnvidia\b/g, '').trim(),
+        normalized.replace(/\bamd\b/g, '').trim(),
+    ]);
+    if (/\bti\b/.test(normalized)) {
+        candidates.add(normalized.replace(/\bti\b/g, 'ti').replace(/\s+/g, ' ').trim());
+    }
+    return Array.from(candidates).filter(Boolean);
 }
 function listingMatchesAlias(titleNormalized, titleCompact, alias) {
-    const aliasNormalized = normalizeText(alias);
-    if (!aliasNormalized)
-        return false;
-    const aliasCompact = aliasNormalized.replace(/\s+/g, '');
-    return titleNormalized.includes(aliasNormalized) || titleCompact.includes(aliasCompact);
+    return aliasCandidates(alias).some(aliasCandidate => {
+        const aliasCompact = aliasCandidate.replace(/\s+/g, '');
+        return titleNormalized.includes(aliasCandidate) || titleCompact.includes(aliasCompact);
+    });
+}
+function listingMatchesNegativeAlias(listing, negativeAlias) {
+    const searchText = buildListingSearchText(listing);
+    return listingMatchesAlias(normalizeText(searchText), compactComparableText(searchText), negativeAlias);
 }
 export function selectProfileForListing(profiles, listing) {
     const titleNormalized = normalizeText(listing.title);
@@ -19,8 +34,15 @@ export function selectProfileForListing(profiles, listing) {
     const searchText = buildListingSearchText(listing);
     const searchNormalized = normalizeText(searchText);
     const searchCompact = compactComparableText(searchText);
+    const listingVramGb = detectListingVramGb(listing);
     const matches = [];
     for (const profile of profiles) {
+        if (profile.negativeAliases.some(negativeAlias => listingMatchesNegativeAlias(listing, negativeAlias))) {
+            continue;
+        }
+        if (profile.vramVariants && listingVramGb !== undefined && listingVramGb !== profile.vramGb) {
+            continue;
+        }
         for (const alias of profile.aliases) {
             const titleMatched = listingMatchesAlias(titleNormalized, titleCompact, alias);
             const extendedMatched = titleMatched || listingMatchesAlias(searchNormalized, searchCompact, alias);
@@ -29,7 +51,9 @@ export function selectProfileForListing(profiles, listing) {
             matches.push({
                 profile,
                 alias,
-                score: normalizeText(alias).length + (titleMatched ? 1000 : 0),
+                score: normalizeText(alias).length
+                    + (titleMatched ? 1000 : 0)
+                    + (profile.vramVariants && listingVramGb === profile.vramGb ? 500 : 0),
             });
         }
     }

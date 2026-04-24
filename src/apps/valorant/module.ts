@@ -16,6 +16,7 @@ import type {
   ValorantTournamentScope,
 } from './domain/models.js';
 import type { Notifier } from '../../integrations/notifier.js';
+import type { BotCommandBindings } from '../../integrations/botBindings.js';
 
 export class ValorantModule {
   private readonly repository = new FileValorantRepository({
@@ -116,6 +117,33 @@ export class ValorantModule {
         metaChanges: summarizeMetaChanges(previousState, result.state),
       });
     });
+  }
+
+  getNotifierBindings(): Pick<
+    BotCommandBindings,
+    | 'onValorantStatusRequested'
+    | 'onValorantSyncRequested'
+    | 'onValorantHelpRequested'
+    | 'onValorantTopRequested'
+    | 'onValorantAgentRequested'
+    | 'onValorantMapMetaRequested'
+    | 'onValorantEventsRequested'
+    | 'onValorantTeamRequested'
+    | 'onValorantCompBuilderStart'
+    | 'onValorantCompBuilderAction'
+  > {
+    return {
+      onValorantStatusRequested: async () => this.getStatus(),
+      onValorantSyncRequested: async () => this.triggerManualSync(),
+      onValorantHelpRequested: async () => this.getHelpText(),
+      onValorantTopRequested: async input => this.getTopCompositionsText(input),
+      onValorantAgentRequested: async input => this.getAgentText(input),
+      onValorantMapMetaRequested: async input => this.getMapMetaText(input),
+      onValorantEventsRequested: async input => this.getEventsText(input),
+      onValorantTeamRequested: async input => this.getTeamText(input),
+      onValorantCompBuilderStart: async (userId, options) => this.startCompBuilder(userId, options),
+      onValorantCompBuilderAction: async input => this.handleCompBuilderAction(input.userId, input.sessionId, input.action),
+    };
   }
 
   async getHelpText(): Promise<string> {
