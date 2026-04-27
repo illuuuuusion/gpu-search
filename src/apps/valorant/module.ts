@@ -41,6 +41,8 @@ export class ValorantModule {
     {
       windowDays: env.VALORANT_WINDOW_DAYS,
       provider: env.VALORANT_PROVIDER,
+      maxRetries: env.VALORANT_SYNC_MAX_RETRIES,
+      retryDelayMs: env.VALORANT_SYNC_RETRY_DELAY_MS,
     },
   );
 

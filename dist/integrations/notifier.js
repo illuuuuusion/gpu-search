@@ -28,4 +28,7 @@ export class ConsoleNotifier {
     async delete() {
         // Console alerts are ephemeral; nothing to delete.
     }
+    async markUnavailable(receipt, details) {
+        console.log(`[listing-expired] messageId=${receipt.messageId ?? 'n/a'} checkedAt=${details.checkedAt} reason=${details.reason}`);
+    }
 }

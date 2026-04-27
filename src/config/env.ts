@@ -39,11 +39,15 @@ const envSchema = z.object({
   NOTIFIER_PROVIDER: z.enum(['console', 'discord']).default('console'),
   DISCORD_BOT_TOKEN: optionalString,
   DISCORD_CHANNEL_ID: optionalString,
+  DISCORD_ADMIN_STATE_PATH: optionalString,
   DISCORD_SEND_DELAY_MS: z.coerce.number().default(750),
   DISCORD_RATE_LIMIT_BUFFER_MS: z.coerce.number().default(250),
   DISCORD_MAX_SEND_RETRIES: z.coerce.number().default(5),
   SCANNER_STATE_PATH: optionalString,
   MARKET_SUMMARY_PATH: optionalString,
+  SCANNER_AVAILABILITY_REFRESH_ENABLED: booleanFromString.default(true),
+  SCANNER_AVAILABILITY_RECHECK_MINUTES: z.coerce.number().default(12),
+  SCANNER_AVAILABILITY_UNAVAILABLE_ACTION: z.enum(['delete', 'mark_expired']).default('delete'),
   SCANNER_SEEN_RETENTION_DAYS: z.coerce.number().default(30),
   SCANNER_STATS_WINDOW_DAYS: z.coerce.number().default(90),
   SCANNER_AVAILABILITY_RECHECK_HOURS: z.coerce.number().default(6),
@@ -60,6 +64,8 @@ const envSchema = z.object({
   VALORANT_RAW_RETENTION_DAYS: z.coerce.number().default(7),
   VALORANT_BUILDER_SESSION_TTL_MINUTES: z.coerce.number().default(30),
   VALORANT_VLR_BASE_URL: z.string().default('https://www.vlr.gg'),
+  VALORANT_SYNC_MAX_RETRIES: z.coerce.number().min(0).max(10).default(2),
+  VALORANT_SYNC_RETRY_DELAY_MS: z.coerce.number().min(250).max(60_000).default(2_500),
   VALORANT_VLR_MIN_REQUEST_INTERVAL_MS: z.coerce.number().default(1250),
   VALORANT_VLR_MAX_EVENT_PAGES: z.coerce.number().min(1).max(10).default(3),
   VALORANT_VLR_MAX_MATCH_TIMESTAMP_LOOKUPS: z.coerce.number().min(1).max(500).default(60),
@@ -97,11 +103,15 @@ interface AppEnv {
   NOTIFIER_PROVIDER: 'console' | 'discord';
   DISCORD_BOT_TOKEN: string;
   DISCORD_CHANNEL_ID: string;
+  DISCORD_ADMIN_STATE_PATH?: string;
   DISCORD_SEND_DELAY_MS: number;
   DISCORD_RATE_LIMIT_BUFFER_MS: number;
   DISCORD_MAX_SEND_RETRIES: number;
   SCANNER_STATE_PATH?: string;
   MARKET_SUMMARY_PATH?: string;
+  SCANNER_AVAILABILITY_REFRESH_ENABLED: boolean;
+  SCANNER_AVAILABILITY_RECHECK_MINUTES: number;
+  SCANNER_AVAILABILITY_UNAVAILABLE_ACTION: 'delete' | 'mark_expired';
   SCANNER_SEEN_RETENTION_DAYS: number;
   SCANNER_STATS_WINDOW_DAYS: number;
   SCANNER_AVAILABILITY_RECHECK_HOURS: number;
@@ -118,6 +128,8 @@ interface AppEnv {
   VALORANT_RAW_RETENTION_DAYS: number;
   VALORANT_BUILDER_SESSION_TTL_MINUTES: number;
   VALORANT_VLR_BASE_URL: string;
+  VALORANT_SYNC_MAX_RETRIES: number;
+  VALORANT_SYNC_RETRY_DELAY_MS: number;
   VALORANT_VLR_MIN_REQUEST_INTERVAL_MS: number;
   VALORANT_VLR_MAX_EVENT_PAGES: number;
   VALORANT_VLR_MAX_MATCH_TIMESTAMP_LOOKUPS: number;

@@ -109,6 +109,15 @@ export interface MarketDashboardSnapshot {
   windowDays: number;
   snapshotPath: string;
   profiles: ProfileMarketSnapshot[];
+  activeListings: Array<{
+    listingId: string;
+    profileName: string;
+    sentAt: string;
+    lastAvailabilityCheckAt?: string;
+    lastAvailabilityState?: 'available' | 'unavailable' | 'check_failed';
+    lastAvailabilityReason?: string;
+    availabilityCheckFailures?: number;
+  }>;
   barCharts: {
     acceptedCountByProfile: MarketBarDatum[];
     averageWorkingPriceByProfile: MarketBarDatum[];

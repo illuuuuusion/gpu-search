@@ -31,29 +31,51 @@ export class ScannerService {
         }
         await this.initializationPromise;
     }
-    async cleanupUnavailableListings() {
+    async refreshAvailability() {
+        await this.ensureInitialized();
+        if (this.currentRunPromise) {
+            await this.currentRunPromise;
+        }
         const dueListings = this.state.getListingsDueForAvailabilityCheck();
         let removalCount = 0;
+        let checkedListings = 0;
+        let failedChecks = 0;
         for (const record of dueListings) {
             try {
                 const availability = await checkListingAvailability(record.listingId);
+                checkedListings += 1;
                 if (availability.available) {
-                    await this.state.recordAvailabilityCheck(record.listingId, availability.checkedAt);
+                    await this.state.recordAvailabilityCheck(record.listingId, availability.checkedAt, 'available', availability.reason);
                     continue;
                 }
-                if (this.notifier.delete) {
-                    await this.notifier.delete({
-                        messageId: record.notificationMessageId,
-                        channelId: record.notificationChannelId,
-                    });
+                await this.state.recordAvailabilityCheck(record.listingId, availability.checkedAt, 'unavailable', availability.reason);
+                if (env.SCANNER_AVAILABILITY_UNAVAILABLE_ACTION === 'mark_expired') {
+                    if (this.notifier.markUnavailable) {
+                        await this.notifier.markUnavailable({
+                            messageId: record.notificationMessageId,
+                            channelId: record.notificationChannelId,
+                        }, {
+                            reason: availability.reason,
+                            checkedAt: availability.checkedAt,
+                        });
+                    }
                 }
-                await this.state.forgetSeen(record.listingId);
+                else {
+                    if (this.notifier.delete) {
+                        await this.notifier.delete({
+                            messageId: record.notificationMessageId,
+                            channelId: record.notificationChannelId,
+                        });
+                    }
+                    await this.state.forgetSeen(record.listingId);
+                }
                 removalCount += 1;
                 logger.info({
                     listingId: record.listingId,
                     profile: record.profileName,
                     reason: availability.reason,
-                }, 'Removed unavailable listing notification');
+                    action: env.SCANNER_AVAILABILITY_UNAVAILABLE_ACTION,
+                }, 'Handled unavailable listing notification');
             }
             catch (error) {
                 logger.warn({
@@ -61,9 +83,15 @@ export class ScannerService {
                     listingId: record.listingId,
                     profile: record.profileName,
                 }, 'Failed to verify sent listing availability');
+                failedChecks += 1;
+                await this.state.recordAvailabilityFailure(record.listingId, new Date().toISOString(), error instanceof Error ? error.message : String(error));
             }
         }
-        return removalCount;
+        return {
+            checkedListings,
+            removedListings: removalCount,
+            failedChecks,
+        };
     }
     async resetState(profiles) {
         await this.ensureInitialized();
@@ -219,9 +247,9 @@ export class ScannerService {
                     }, 'failed to send notification');
                 }
             }
-            const availabilityRemovals = runAvailabilityCleanup
-                ? await this.cleanupUnavailableListings()
-                : 0;
+            const availabilityRefresh = runAvailabilityCleanup
+                ? await this.refreshAvailability()
+                : { checkedListings: 0, removedListings: 0, failedChecks: 0 };
             if (persistState) {
                 try {
                     await this.exportMarketDashboard(profiles);
@@ -236,7 +264,7 @@ export class ScannerService {
                 seenSkipped,
                 alertsPosted,
                 notificationFailures,
-                availabilityRemovals,
+                availabilityRemovals: availabilityRefresh.removedListings,
             };
         })();
         this.currentRunPromise = runPromise;

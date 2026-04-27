@@ -45,6 +45,10 @@ async function bootstrap() {
     await gpuModule.start();
 }
 bootstrap().catch(error => {
-    logger.error({ error }, 'fatal startup error');
+    logger.error({
+        error,
+        message: error instanceof Error ? error.message : String(error),
+        code: typeof error === 'object' && error && 'code' in error ? error.code : undefined,
+    }, 'fatal startup error');
     process.exit(1);
 });

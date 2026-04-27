@@ -54,6 +54,7 @@ export interface Notifier {
   sendScanStatus?(message: ScanStatusMessage): Promise<void>;
   sendValorantSyncStatus?(message: ValorantSyncStatusMessage): Promise<void>;
   sendMarketDigest?(message: MarketDigestMessage): Promise<void>;
+  markUnavailable?(receipt: NotificationReceipt, details: { reason: string; checkedAt: string }): Promise<void>;
   delete?(receipt: NotificationReceipt): Promise<void>;
 }
 
@@ -95,5 +96,9 @@ export class ConsoleNotifier implements Notifier {
 
   async delete(): Promise<void> {
     // Console alerts are ephemeral; nothing to delete.
+  }
+
+  async markUnavailable(receipt: NotificationReceipt, details: { reason: string; checkedAt: string }): Promise<void> {
+    console.log(`[listing-expired] messageId=${receipt.messageId ?? 'n/a'} checkedAt=${details.checkedAt} reason=${details.reason}`);
   }
 }

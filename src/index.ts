@@ -51,6 +51,10 @@ async function bootstrap(): Promise<void> {
 }
 
 bootstrap().catch(error => {
-  logger.error({ error }, 'fatal startup error');
+  logger.error({
+    error,
+    message: error instanceof Error ? error.message : String(error),
+    code: typeof error === 'object' && error && 'code' in error ? (error as { code?: unknown }).code : undefined,
+  }, 'fatal startup error');
   process.exit(1);
 });

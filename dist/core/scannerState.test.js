@@ -84,3 +84,19 @@ test('buildMarketDashboardSnapshot exposes chart-friendly daily and weekly serie
     assert.ok(snapshot.profiles[0]?.charts.weekly.length >= 1);
     assert.equal(snapshot.barCharts.acceptedCountByProfile[0]?.value, 2);
 });
+test('availability tracking updates active listing status for web-ready snapshots', async () => {
+    const store = new ScannerStateStore();
+    await store.load();
+    await store.reset();
+    await store.recordSent(buildResult({}), {
+        messageId: 'message-1',
+        channelId: 'channel-1',
+    });
+    await store.recordAvailabilityCheck('listing-1', '2026-04-26T10:00:00.000Z', 'available', 'available');
+    await store.recordAvailabilityFailure('listing-1', '2026-04-26T10:12:00.000Z', 'temporary_error');
+    const snapshot = store.buildMarketDashboardSnapshot([profile]);
+    assert.equal(snapshot.activeListings.length, 1);
+    assert.equal(snapshot.activeListings[0]?.lastAvailabilityState, 'check_failed');
+    assert.equal(snapshot.activeListings[0]?.availabilityCheckFailures, 1);
+    assert.equal(snapshot.activeListings[0]?.lastAvailabilityReason, 'temporary_error');
+});

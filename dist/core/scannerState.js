@@ -150,11 +150,15 @@ export class ScannerStateStore {
         ]);
     }
     getListingsDueForAvailabilityCheck(referenceTime = Date.now()) {
-        const cutoff = cutoffTimestamp(env.SCANNER_AVAILABILITY_RECHECK_HOURS / 24, referenceTime);
+        const refreshMinutes = env.SCANNER_AVAILABILITY_RECHECK_MINUTES > 0
+            ? env.SCANNER_AVAILABILITY_RECHECK_MINUTES
+            : env.SCANNER_AVAILABILITY_RECHECK_HOURS * 60;
+        const cutoff = referenceTime - refreshMinutes * 60 * 1000;
         return Array.from(this.seen.values())
             .filter(record => {
             const lastCheck = record.lastAvailabilityCheckAt ?? record.sentAt;
-            return new Date(lastCheck).getTime() <= cutoff;
+            return record.lastAvailabilityState !== 'unavailable'
+                && new Date(lastCheck).getTime() <= cutoff;
         })
             .sort((left, right) => {
             const leftTime = left.lastAvailabilityCheckAt ?? left.sentAt;
@@ -172,6 +176,9 @@ export class ScannerStateStore {
             notificationMessageId: receipt?.messageId,
             notificationChannelId: receipt?.channelId,
             lastAvailabilityCheckAt: sentAt,
+            lastAvailabilityState: 'available',
+            lastAvailabilityReason: 'sent',
+            availabilityCheckFailures: 0,
         });
         this.observations = [
             ...this.observations.filter(observation => observation.listingId !== result.listing.id),
@@ -199,7 +206,7 @@ export class ScannerStateStore {
             logger.warn({ error, listingId: result.listing.id }, 'Failed to persist scanner observation');
         }
     }
-    async recordAvailabilityCheck(listingId, checkedAt) {
+    async recordAvailabilityCheck(listingId, checkedAt, state, reason) {
         const existing = this.seen.get(listingId);
         if (!existing) {
             return;
@@ -207,6 +214,9 @@ export class ScannerStateStore {
         this.seen.set(listingId, {
             ...existing,
             lastAvailabilityCheckAt: checkedAt,
+            lastAvailabilityState: state,
+            lastAvailabilityReason: reason,
+            availabilityCheckFailures: 0,
         });
         try {
             await this.persist();
@@ -240,6 +250,25 @@ export class ScannerStateStore {
         }
         catch (error) {
             logger.warn({ error, listingId }, 'Failed to persist scanner seen removal');
+        }
+    }
+    async recordAvailabilityFailure(listingId, checkedAt, reason) {
+        const existing = this.seen.get(listingId);
+        if (!existing) {
+            return;
+        }
+        this.seen.set(listingId, {
+            ...existing,
+            lastAvailabilityCheckAt: checkedAt,
+            lastAvailabilityState: 'check_failed',
+            lastAvailabilityReason: reason,
+            availabilityCheckFailures: (existing.availabilityCheckFailures ?? 0) + 1,
+        });
+        try {
+            await this.persist();
+        }
+        catch (error) {
+            logger.warn({ error, listingId }, 'Failed to persist scanner availability failure');
         }
     }
     shouldSendDigest(cadence, referenceTime = new Date().toISOString()) {
@@ -301,6 +330,17 @@ export class ScannerStateStore {
             windowDays: env.SCANNER_STATS_WINDOW_DAYS,
             snapshotPath: getMarketSummaryPath(),
             profiles: profileSnapshots,
+            activeListings: Array.from(this.seen.values())
+                .sort((left, right) => left.sentAt.localeCompare(right.sentAt))
+                .map(record => ({
+                listingId: record.listingId,
+                profileName: record.profileName,
+                sentAt: record.sentAt,
+                lastAvailabilityCheckAt: record.lastAvailabilityCheckAt,
+                lastAvailabilityState: record.lastAvailabilityState,
+                lastAvailabilityReason: record.lastAvailabilityReason,
+                availabilityCheckFailures: record.availabilityCheckFailures,
+            })),
             barCharts: {
                 acceptedCountByProfile,
                 averageWorkingPriceByProfile,

@@ -12,6 +12,7 @@ import {
   GatewayIntentBits,
   ModalBuilder,
   MessageFlags,
+  PermissionFlagsBits,
   SlashCommandBuilder,
   type SlashCommandOptionsOnlyBuilder,
   StringSelectMenuBuilder,
@@ -21,7 +22,9 @@ import {
   type Interaction,
   type MessageComponentInteraction,
   type Message,
+  type MessageReaction,
   type ModalSubmitInteraction,
+  type User,
 } from 'discord.js';
 import type {
   CompBuilderAction,
@@ -43,6 +46,8 @@ import type {
 import type { MarketDigestMessage } from '../../types/domain.js';
 import type { BotCommandBindings, ScanCommandResult } from '../botBindings.js';
 import { logger } from '../../utils/logger.js';
+import { DiscordAdminStateStore, type ReminderRecord, type WarningRecord } from './adminState.js';
+import { formatGuildConfigSummary, parseReminderDuration, renderWelcomeTemplate } from './adminUtils.js';
 
 const DISCORD_ACTIVITY_NAME = 'eBay GPU-Deals';
 const SCANNER_STATE_RESET_COMMAND = 'scanner-state-reset';
@@ -50,6 +55,12 @@ const SCAN_NOW_COMMAND = 'scan-now';
 const FORCE_RESCAN_COMMAND = 'force-rescan';
 const DEBUG_SCAN_COMMAND = 'debug-scan';
 const SCAN_INFO_COMMAND = 'scan-info';
+const CONFIG_COMMAND = 'config';
+const POLL_COMMAND = 'poll';
+const DELETE_COMMAND = 'delete';
+const WARN_COMMAND = 'warn';
+const WARNINGS_COMMAND = 'warnings';
+const REMIND_COMMAND = 'remind';
 const VCT_STATUS_COMMAND = 'vct-status';
 const VCT_SYNC_COMMAND = 'vct-sync';
 const VCT_SCAN_COMMAND = 'vct-scan';
@@ -66,6 +77,8 @@ const ALERT_FOOTER_TEXT = 'GPU-Search';
 const AUTOMATIC_SCAN_STATUS_FOOTER_TEXT = 'GPU-Search • Auto-Scan-Status';
 const MARKET_DIGEST_FOOTER_TEXT = 'GPU-Search • Markt-Zusammenfassung';
 const VALORANT_SYNC_FOOTER_TEXT = 'GPU-Search • VALORANT Meta Update';
+const MODERATION_LOG_FOOTER_TEXT = 'GPU-Search • Moderation';
+const POLL_EMOJIS = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣'];
 const DISCORD_ADMIN_USER_IDS = new Set([
   '504707482547912714',
   '689513442867937321',
@@ -614,17 +627,25 @@ function isAlreadyAcknowledgedInteractionError(error: unknown): boolean {
 
 export class DiscordNotifier implements Notifier {
   private readonly client = new Client({
-    intents: [GatewayIntentBits.Guilds],
+    intents: [
+      GatewayIntentBits.Guilds,
+      GatewayIntentBits.GuildMembers,
+      GatewayIntentBits.GuildMessages,
+      GatewayIntentBits.MessageContent,
+    ],
     presence: {
       activities: [{ name: DISCORD_ACTIVITY_NAME, type: ActivityType.Watching }],
       status: 'online',
     },
   });
+  private readonly adminState = new DiscordAdminStateStore();
 
   private nextSendAt = 0;
   private readyPromise: Promise<void> | null = null;
   private commandsRegistered = false;
   private activeAutomaticScanStatus: NotificationReceipt | null = null;
+  private reminderTimer: NodeJS.Timeout | null = null;
+  private readonly messageWindows = new Map<string, number[]>();
 
   constructor(private readonly options: DiscordNotifierOptions = {}) {
     if (!env.DISCORD_BOT_TOKEN || !env.DISCORD_CHANNEL_ID) {
@@ -656,6 +677,18 @@ export class DiscordNotifier implements Notifier {
         }, 'Failed to handle Discord interaction');
       });
     });
+
+    this.client.on(Events.MessageCreate, message => {
+      void this.handleMessageCreate(message).catch(error => {
+        logger.error({ error, messageId: message.id }, 'Failed to handle Discord message');
+      });
+    });
+
+    this.client.on(Events.GuildMemberAdd, member => {
+      void this.handleGuildMemberAdd(member).catch(error => {
+        logger.error({ error, guildId: member.guild.id, memberId: member.id }, 'Failed to handle guild member add');
+      });
+    });
   }
 
   async start(): Promise<void> {
@@ -666,6 +699,7 @@ export class DiscordNotifier implements Notifier {
     if (!this.readyPromise) {
       this.readyPromise = (async () => {
         const ready = once(this.client, Events.ClientReady);
+        await this.adminState.load();
         await this.client.login(env.DISCORD_BOT_TOKEN);
         if (!this.client.isReady()) {
           await ready;
@@ -675,6 +709,7 @@ export class DiscordNotifier implements Notifier {
           status: 'online',
         });
         await this.registerCommands();
+        this.startReminderLoop();
       })();
     }
 
@@ -802,6 +837,60 @@ export class DiscordNotifier implements Notifier {
     }
   }
 
+  async markUnavailable(receipt: NotificationReceipt, details: { reason: string; checkedAt: string }): Promise<void> {
+    if (!receipt.messageId) {
+      return;
+    }
+
+    await this.start();
+
+    const channelId = receipt.channelId ?? env.DISCORD_CHANNEL_ID;
+    const channel = await this.client.channels.fetch(channelId);
+    if (!channel?.isTextBased() || !('messages' in channel)) {
+      throw new Error('Configured Discord channel is not text-based');
+    }
+
+    try {
+      const message = await channel.messages.fetch(receipt.messageId);
+      const existingEmbed = message.embeds[0];
+      const embed = existingEmbed
+        ? EmbedBuilder.from(existingEmbed)
+        : new EmbedBuilder();
+
+      embed
+        .setColor(0xFEE75C)
+        .setFooter({ text: `${ALERT_FOOTER_TEXT} • Angebot nicht mehr verfügbar` })
+        .addFields({
+          name: 'Status',
+          value: `Nicht mehr verfügbar (${details.reason})\nZuletzt geprüft: ${formatDiscordTimestamp(details.checkedAt)}`,
+          inline: false,
+        });
+
+      await message.edit({
+        embeds: [embed],
+        allowedMentions: { parse: [] },
+      });
+    } catch (error) {
+      if (error instanceof DiscordAPIError && error.code === 10008) {
+        return;
+      }
+
+      throw error;
+    }
+  }
+
+  private startReminderLoop(): void {
+    if (this.reminderTimer) {
+      clearInterval(this.reminderTimer);
+    }
+
+    this.reminderTimer = setInterval(() => {
+      void this.flushDueReminders().catch(error => {
+        logger.error({ error }, 'Failed to flush reminders');
+      });
+    }, 15_000);
+  }
+
   private buildAlertEmbed(message: AlertMessage): EmbedBuilder {
     const embed = new EmbedBuilder()
       .setColor(toDiscordColor(message.color))
@@ -908,6 +997,212 @@ export class DiscordNotifier implements Notifier {
     return embed;
   }
 
+  private isAdminUser(interaction: ChatInputCommandInteraction): boolean {
+    return DISCORD_ADMIN_USER_IDS.has(interaction.user.id)
+      || Boolean(interaction.memberPermissions?.has(PermissionFlagsBits.Administrator))
+      || Boolean(interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild));
+  }
+
+  private async fetchLogChannel(guildId: string) {
+    const config = this.adminState.getGuildConfig(guildId);
+    if (!config.logChannelId) {
+      return null;
+    }
+
+    const channel = await this.client.channels.fetch(config.logChannelId);
+    if (!channel?.isTextBased() || !channel.isSendable()) {
+      return null;
+    }
+
+    return channel;
+  }
+
+  private buildModerationLogEmbed(input: {
+    title: string;
+    description: string;
+    fields?: Array<{ name: string; value: string; inline?: boolean }>;
+  }): EmbedBuilder {
+    const embed = new EmbedBuilder()
+      .setColor(0xFEE75C)
+      .setTitle(input.title)
+      .setDescription(input.description)
+      .setFooter({ text: MODERATION_LOG_FOOTER_TEXT })
+      .setTimestamp(new Date());
+
+    if (input.fields && input.fields.length > 0) {
+      embed.addFields(input.fields);
+    }
+
+    return embed;
+  }
+
+  private async logModerationAction(guildId: string, embed: EmbedBuilder): Promise<void> {
+    const channel = await this.fetchLogChannel(guildId);
+    if (!channel) {
+      return;
+    }
+
+    await channel.send({
+      embeds: [embed],
+      allowedMentions: { parse: [] },
+    });
+  }
+
+  private async flushDueReminders(): Promise<void> {
+    const dueReminders = this.adminState.getDueReminders();
+    for (const reminder of dueReminders) {
+      try {
+        const channel = await this.client.channels.fetch(reminder.channelId);
+        if (!channel?.isTextBased() || !channel.isSendable()) {
+          continue;
+        }
+
+        await channel.send({
+          content: `<@${reminder.userId}> Erinnerung: ${reminder.message}`,
+          allowedMentions: { users: [reminder.userId] },
+        });
+        await this.adminState.markReminderSent(reminder.id);
+      } catch (error) {
+        logger.warn({ error, reminderId: reminder.id }, 'Failed to deliver reminder');
+      }
+    }
+  }
+
+  private async createWarning(input: {
+    guildId: string;
+    userId: string;
+    moderatorUserId: string;
+    reason: string;
+  }): Promise<WarningRecord> {
+    const warning = await this.adminState.addWarning(input);
+    const warnings = this.adminState.listWarnings(input.guildId, input.userId);
+    await this.logModerationAction(input.guildId, this.buildModerationLogEmbed({
+      title: 'Warnung erstellt',
+      description: `<@${input.userId}> wurde verwarnt.`,
+      fields: [
+        { name: 'Grund', value: input.reason, inline: false },
+        { name: 'Moderator', value: `<@${input.moderatorUserId}>`, inline: true },
+        { name: 'Warnungen gesamt', value: String(warnings.length), inline: true },
+      ],
+    }));
+    return warning;
+  }
+
+  private async handleGuildMemberAdd(member: import('discord.js').GuildMember): Promise<void> {
+    const config = this.adminState.getGuildConfig(member.guild.id);
+    if (!config.welcome.enabled || !config.welcome.channelId) {
+      return;
+    }
+
+    const channel = await this.client.channels.fetch(config.welcome.channelId);
+    if (!channel?.isTextBased() || !channel.isSendable()) {
+      return;
+    }
+
+    const content = renderWelcomeTemplate(config.welcome.messageTemplate, {
+      mention: `<@${member.id}>`,
+      username: member.user.username,
+      server: member.guild.name,
+    });
+
+    await channel.send({
+      content,
+      allowedMentions: { users: [member.id] },
+    });
+  }
+
+  private async handleMessageCreate(message: import('discord.js').Message): Promise<void> {
+    if (message.author.bot) {
+      return;
+    }
+
+    if (message.content.startsWith('!remind ')) {
+      await this.handlePrefixReminder(message);
+      return;
+    }
+
+    if (!message.guild) {
+      return;
+    }
+
+    await this.applySpamModeration(message);
+  }
+
+  private async handlePrefixReminder(message: import('discord.js').Message): Promise<void> {
+    const [, rawDuration, ...rest] = message.content.trim().split(/\s+/);
+    const reminderText = rest.join(' ').trim();
+    const durationMs = parseReminderDuration(rawDuration ?? '');
+    if (!durationMs || !reminderText) {
+      await message.reply('Nutze `!remind 2h Ranked starten` oder einen ähnlichen Zeitwert mit `s`, `m`, `h`, `d`.');
+      return;
+    }
+
+    if (message.guild) {
+      const config = this.adminState.getGuildConfig(message.guild.id);
+      if (!config.reminders.enabled) {
+        await message.reply('Reminder sind auf diesem Server aktuell deaktiviert.');
+        return;
+      }
+    }
+
+    const dueAt = new Date(Date.now() + durationMs).toISOString();
+    await this.adminState.addReminder({
+      guildId: message.guild?.id,
+      channelId: message.channel.id,
+      userId: message.author.id,
+      message: reminderText,
+      dueAt,
+    });
+
+    await message.reply(`Erinnerung gesetzt für ${formatDiscordTimestamp(dueAt)}.`);
+  }
+
+  private async applySpamModeration(message: import('discord.js').Message): Promise<void> {
+    if (!message.guild || !message.member) {
+      return;
+    }
+
+    const config = this.adminState.getGuildConfig(message.guild.id);
+    if (!config.moderation.enabled) {
+      return;
+    }
+
+    const key = `${message.guild.id}:${message.author.id}`;
+    const windowMs = config.moderation.spamWindowSeconds * 1000;
+    const cutoff = Date.now() - windowMs;
+    const timestamps = (this.messageWindows.get(key) ?? []).filter(timestamp => timestamp >= cutoff);
+    timestamps.push(Date.now());
+    this.messageWindows.set(key, timestamps);
+
+    if (timestamps.length < config.moderation.spamThreshold) {
+      return;
+    }
+
+    this.messageWindows.set(key, []);
+
+    const reason = `Auto-Mute wegen Spam (${timestamps.length} Nachrichten in ${config.moderation.spamWindowSeconds}s)`;
+    await this.createWarning({
+      guildId: message.guild.id,
+      userId: message.author.id,
+      moderatorUserId: this.client.user?.id ?? message.author.id,
+      reason,
+    });
+
+    if (message.member.moderatable) {
+      await message.member.timeout(config.moderation.muteMinutes * 60 * 1000, reason);
+    }
+
+    await this.logModerationAction(message.guild.id, this.buildModerationLogEmbed({
+      title: 'Auto-Mute ausgelöst',
+      description: `<@${message.author.id}> wurde automatisch moderiert.`,
+      fields: [
+        { name: 'Grund', value: reason, inline: false },
+        { name: 'Mute-Dauer', value: `${config.moderation.muteMinutes} Minuten`, inline: true },
+        { name: 'Warn-Schwelle', value: String(config.moderation.warnThreshold), inline: true },
+      ],
+    }));
+  }
+
   private async fetchMessageChannel() {
     const channel = await this.client.channels.fetch(env.DISCORD_CHANNEL_ID);
     if (!channel?.isTextBased() || !channel.isSendable() || !('messages' in channel)) {
@@ -986,6 +1281,88 @@ export class DiscordNotifier implements Notifier {
       new SlashCommandBuilder()
         .setName(SCAN_INFO_COMMAND)
         .setDescription('Zeigt an, wann der nächste automatische Scan geplant ist.')
+        .toJSON(),
+      new SlashCommandBuilder()
+        .setName(CONFIG_COMMAND)
+        .setDescription('Verwaltet Discord-Bot-Features für diesen Server.')
+        .addSubcommand(subcommand =>
+          subcommand
+            .setName('show')
+            .setDescription('Zeigt die aktuelle Server-Konfiguration an.'),
+        )
+        .addSubcommand(subcommand =>
+          subcommand
+            .setName('welcome')
+            .setDescription('Konfiguriert die Willkommensnachricht.')
+            .addBooleanOption(option => option.setName('enabled').setDescription('Welcome-Nachrichten aktivieren').setRequired(true))
+            .addChannelOption(option => option.setName('channel').setDescription('Willkommens-Channel').setRequired(true))
+            .addStringOption(option => option.setName('message').setDescription('Template mit {mention}, {user}, {server}').setRequired(true)),
+        )
+        .addSubcommand(subcommand =>
+          subcommand
+            .setName('moderation')
+            .setDescription('Konfiguriert Auto-Mute bei Spam und Warn-Regeln.')
+            .addBooleanOption(option => option.setName('enabled').setDescription('Moderation aktivieren').setRequired(true))
+            .addIntegerOption(option => option.setName('spam_threshold').setDescription('Nachrichten bis Spam greift').setRequired(true))
+            .addIntegerOption(option => option.setName('spam_window_seconds').setDescription('Zeitfenster in Sekunden').setRequired(true))
+            .addIntegerOption(option => option.setName('mute_minutes').setDescription('Mute-Dauer in Minuten').setRequired(true))
+            .addIntegerOption(option => option.setName('warn_threshold').setDescription('Warn-Schwelle fürs Frontend/Monitoring').setRequired(true))
+            .addChannelOption(option => option.setName('log_channel').setDescription('Moderations-Log-Channel').setRequired(false)),
+        )
+        .addSubcommand(subcommand =>
+          subcommand
+            .setName('polls')
+            .setDescription('Konfiguriert Umfragen.')
+            .addBooleanOption(option => option.setName('enabled').setDescription('Polls aktivieren').setRequired(true))
+            .addIntegerOption(option => option.setName('default_duration_minutes').setDescription('Standardlaufzeit in Minuten').setRequired(true)),
+        )
+        .addSubcommand(subcommand =>
+          subcommand
+            .setName('reminders')
+            .setDescription('Konfiguriert Reminder.')
+            .addBooleanOption(option => option.setName('enabled').setDescription('Reminder aktivieren').setRequired(true)),
+        )
+        .toJSON(),
+      new SlashCommandBuilder()
+        .setName(POLL_COMMAND)
+        .setDescription('Erstellt eine schnelle Umfrage mit Reaktionen.')
+        .addStringOption(option => option.setName('question').setDescription('Frage').setRequired(true))
+        .addStringOption(option => option.setName('option_1').setDescription('Option 1').setRequired(true))
+        .addStringOption(option => option.setName('option_2').setDescription('Option 2').setRequired(true))
+        .addStringOption(option => option.setName('option_3').setDescription('Option 3').setRequired(false))
+        .addStringOption(option => option.setName('option_4').setDescription('Option 4').setRequired(false))
+        .addStringOption(option => option.setName('option_5').setDescription('Option 5').setRequired(false))
+        .addStringOption(option => option.setName('option_6').setDescription('Option 6').setRequired(false))
+        .addIntegerOption(option => option.setName('duration_minutes').setDescription('Optionale Laufzeit').setRequired(false))
+        .toJSON(),
+      new SlashCommandBuilder()
+        .setName(DELETE_COMMAND)
+        .setDescription('Löscht eine Anzahl der letzten Nachrichten im aktuellen Channel.')
+        .addIntegerOption(option =>
+          option
+            .setName('amount')
+            .setDescription('Anzahl der zu löschenden Nachrichten (1-100)')
+            .setRequired(true)
+            .setMinValue(1)
+            .setMaxValue(100),
+        )
+        .toJSON(),
+      new SlashCommandBuilder()
+        .setName(WARN_COMMAND)
+        .setDescription('Erstellt eine Warnung für einen Nutzer.')
+        .addUserOption(option => option.setName('user').setDescription('Zielnutzer').setRequired(true))
+        .addStringOption(option => option.setName('reason').setDescription('Warnungsgrund').setRequired(true))
+        .toJSON(),
+      new SlashCommandBuilder()
+        .setName(WARNINGS_COMMAND)
+        .setDescription('Zeigt die Warnungen eines Nutzers an.')
+        .addUserOption(option => option.setName('user').setDescription('Zielnutzer').setRequired(true))
+        .toJSON(),
+      new SlashCommandBuilder()
+        .setName(REMIND_COMMAND)
+        .setDescription('Erstellt einen Reminder.')
+        .addStringOption(option => option.setName('time').setDescription('Zeitformat wie 10m, 2h, 1d').setRequired(true))
+        .addStringOption(option => option.setName('message').setDescription('Erinnerungstext').setRequired(true))
         .toJSON(),
       new SlashCommandBuilder()
         .setName(VCT_STATUS_COMMAND)
@@ -1090,6 +1467,12 @@ export class DiscordNotifier implements Notifier {
       interaction.commandName !== FORCE_RESCAN_COMMAND &&
       interaction.commandName !== DEBUG_SCAN_COMMAND &&
       interaction.commandName !== SCAN_INFO_COMMAND &&
+      interaction.commandName !== CONFIG_COMMAND &&
+      interaction.commandName !== POLL_COMMAND &&
+      interaction.commandName !== DELETE_COMMAND &&
+      interaction.commandName !== WARN_COMMAND &&
+      interaction.commandName !== WARNINGS_COMMAND &&
+      interaction.commandName !== REMIND_COMMAND &&
       interaction.commandName !== VCT_STATUS_COMMAND &&
       interaction.commandName !== VCT_SYNC_COMMAND &&
       interaction.commandName !== VCT_SCAN_COMMAND &&
@@ -1101,6 +1484,14 @@ export class DiscordNotifier implements Notifier {
       interaction.commandName !== VCT_TEAM_COMMAND &&
       interaction.commandName !== COMP_BUILDER_COMMAND
     ) {
+      return;
+    }
+
+    if ([CONFIG_COMMAND, POLL_COMMAND, DELETE_COMMAND, WARN_COMMAND].includes(interaction.commandName) && !this.isAdminUser(interaction)) {
+      await interaction.reply({
+        content: 'Du brauchst Administrator- oder Server-Verwalten-Rechte für diesen Command.',
+        flags: MessageFlags.Ephemeral,
+      });
       return;
     }
 
@@ -1123,6 +1514,72 @@ export class DiscordNotifier implements Notifier {
       return;
     }
 
+    if (interaction.commandName === CONFIG_COMMAND) {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      const guildId = interaction.guildId;
+      if (!guildId) {
+        await interaction.editReply('Dieser Command funktioniert nur auf einem Server.');
+        return;
+      }
+
+      const subcommand = interaction.options.getSubcommand();
+      if (subcommand === 'show') {
+        const config = this.adminState.getGuildConfig(guildId);
+        await interaction.editReply(formatGuildConfigSummary(config));
+        return;
+      }
+
+      if (subcommand === 'welcome') {
+        const config = await this.adminState.updateGuildConfig(guildId, current => ({
+          ...current,
+          welcome: {
+            enabled: interaction.options.getBoolean('enabled', true),
+            channelId: interaction.options.getChannel('channel', true).id,
+            messageTemplate: interaction.options.getString('message', true),
+          },
+        }));
+        await interaction.editReply(`Welcome-Konfiguration gespeichert.\n${formatGuildConfigSummary(config)}`);
+        return;
+      }
+
+      if (subcommand === 'moderation') {
+        const config = await this.adminState.updateGuildConfig(guildId, current => ({
+          ...current,
+          logChannelId: interaction.options.getChannel('log_channel')?.id ?? current.logChannelId,
+          moderation: {
+            enabled: interaction.options.getBoolean('enabled', true),
+            spamThreshold: interaction.options.getInteger('spam_threshold', true),
+            spamWindowSeconds: interaction.options.getInteger('spam_window_seconds', true),
+            muteMinutes: interaction.options.getInteger('mute_minutes', true),
+            warnThreshold: interaction.options.getInteger('warn_threshold', true),
+          },
+        }));
+        await interaction.editReply(`Moderations-Konfiguration gespeichert.\n${formatGuildConfigSummary(config)}`);
+        return;
+      }
+
+      if (subcommand === 'polls') {
+        const config = await this.adminState.updateGuildConfig(guildId, current => ({
+          ...current,
+          polls: {
+            enabled: interaction.options.getBoolean('enabled', true),
+            defaultDurationMinutes: interaction.options.getInteger('default_duration_minutes', true),
+          },
+        }));
+        await interaction.editReply(`Poll-Konfiguration gespeichert.\n${formatGuildConfigSummary(config)}`);
+        return;
+      }
+
+      const config = await this.adminState.updateGuildConfig(guildId, current => ({
+        ...current,
+        reminders: {
+          enabled: interaction.options.getBoolean('enabled', true),
+        },
+      }));
+      await interaction.editReply(`Reminder-Konfiguration gespeichert.\n${formatGuildConfigSummary(config)}`);
+      return;
+    }
+
     const isPublicValorantCommand = [
       VCT_STATUS_COMMAND,
       VCT_HELP_COMMAND,
@@ -1131,6 +1588,8 @@ export class DiscordNotifier implements Notifier {
       VCT_MAP_META_COMMAND,
       VCT_EVENTS_COMMAND,
       VCT_TEAM_COMMAND,
+      WARNINGS_COMMAND,
+      REMIND_COMMAND,
     ].includes(interaction.commandName);
     if (!isPublicValorantCommand && !DISCORD_ADMIN_USER_IDS.has(interaction.user.id)) {
       await interaction.reply({
@@ -1255,6 +1714,122 @@ export class DiscordNotifier implements Notifier {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     try {
+      if (interaction.commandName === POLL_COMMAND) {
+        const guildId = interaction.guildId;
+        if (!guildId || !interaction.channel || !interaction.channel.isTextBased() || !interaction.channel.isSendable()) {
+          await interaction.editReply('Polls funktionieren nur auf einem Server-Channel.');
+          return;
+        }
+
+        const config = this.adminState.getGuildConfig(guildId);
+        if (!config.polls.enabled) {
+          await interaction.editReply('Polls sind auf diesem Server deaktiviert.');
+          return;
+        }
+
+        const options = [1, 2, 3, 4, 5, 6]
+          .map(index => interaction.options.getString(`option_${index}`))
+          .filter((value): value is string => Boolean(value));
+        const durationMinutes = interaction.options.getInteger('duration_minutes') ?? config.polls.defaultDurationMinutes;
+        const closesAt = new Date(Date.now() + durationMinutes * 60_000).toISOString();
+        const embed = new EmbedBuilder()
+          .setColor(0x5865F2)
+          .setTitle('Umfrage')
+          .setDescription(interaction.options.getString('question', true))
+          .addFields(options.map((option, index) => ({
+            name: `${POLL_EMOJIS[index]} Option ${index + 1}`,
+            value: option,
+            inline: false,
+          })))
+          .setFooter({ text: `Poll • offen bis ${new Date(closesAt).toLocaleString('de-DE')}` });
+
+        const sent = await interaction.channel.send({
+          embeds: [embed],
+          allowedMentions: { parse: [] },
+        });
+        for (const emoji of POLL_EMOJIS.slice(0, options.length)) {
+          await sent.react(emoji);
+        }
+
+        await interaction.editReply(`Umfrage erstellt: ${sent.url}`);
+        return;
+      }
+
+      if (interaction.commandName === DELETE_COMMAND) {
+        const amount = interaction.options.getInteger('amount', true);
+        if (!interaction.channel || !interaction.channel.isTextBased() || !('bulkDelete' in interaction.channel)) {
+          await interaction.editReply('Dieser Command funktioniert nur in Text-Channels.');
+          return;
+        }
+
+        const deletedMessages = await interaction.channel.bulkDelete(amount, true);
+        await interaction.editReply(`${deletedMessages.size} Nachrichten wurden gelöscht.`);
+        return;
+      }
+
+      if (interaction.commandName === WARN_COMMAND) {
+        const guildId = interaction.guildId;
+        if (!guildId) {
+          await interaction.editReply('Warnungen funktionieren nur auf einem Server.');
+          return;
+        }
+
+        const user = interaction.options.getUser('user', true);
+        const reason = interaction.options.getString('reason', true);
+        const warning = await this.createWarning({
+          guildId,
+          userId: user.id,
+          moderatorUserId: interaction.user.id,
+          reason,
+        });
+        await interaction.editReply(`Warnung erstellt für ${user.tag}. ID: ${warning.id}`);
+        return;
+      }
+
+      if (interaction.commandName === WARNINGS_COMMAND) {
+        const guildId = interaction.guildId;
+        if (!guildId) {
+          await interaction.editReply('Warnungen funktionieren nur auf einem Server.');
+          return;
+        }
+
+        const user = interaction.options.getUser('user', true);
+        const warnings = this.adminState.listWarnings(guildId, user.id);
+        await interaction.editReply(
+          warnings.length === 0
+            ? `${user.tag} hat keine Warnungen.`
+            : warnings.slice(-10).map((warning, index) => `${index + 1}. ${warning.createdAt}: ${warning.reason}`).join('\n'),
+        );
+        return;
+      }
+
+      if (interaction.commandName === REMIND_COMMAND) {
+        const durationMs = parseReminderDuration(interaction.options.getString('time', true));
+        if (!durationMs) {
+          await interaction.editReply('Ungültiges Zeitformat. Nutze z. B. `10m`, `2h`, `1d`.');
+          return;
+        }
+
+        if (interaction.guildId) {
+          const config = this.adminState.getGuildConfig(interaction.guildId);
+          if (!config.reminders.enabled) {
+            await interaction.editReply('Reminder sind auf diesem Server deaktiviert.');
+            return;
+          }
+        }
+
+        const dueAt = new Date(Date.now() + durationMs).toISOString();
+        await this.adminState.addReminder({
+          guildId: interaction.guildId ?? undefined,
+          channelId: interaction.channelId,
+          userId: interaction.user.id,
+          message: interaction.options.getString('message', true),
+          dueAt,
+        });
+        await interaction.editReply(`Reminder gesetzt für ${formatDiscordTimestamp(dueAt)}.`);
+        return;
+      }
+
       if (interaction.commandName === VCT_HELP_COMMAND) {
         const text = await this.options.onValorantHelpRequested?.();
         await interaction.editReply(text ?? 'VALORANT-Hilfe ist aktuell nicht verfügbar.');
@@ -1381,7 +1956,17 @@ export class DiscordNotifier implements Notifier {
             : `Manueller Scan abgeschlossen. ${formatScanStats(result.summary)}. Nächster automatischer Scan: ${formatDiscordTimestamp(result.nextAutomaticScanAt)}.`,
       );
     } catch (error) {
-      if (interaction.commandName === SCANNER_STATE_RESET_COMMAND) {
+      if (interaction.commandName === POLL_COMMAND) {
+        await interaction.editReply('Umfrage konnte nicht erstellt werden.');
+      } else if (interaction.commandName === DELETE_COMMAND) {
+        await interaction.editReply('Nachrichten konnten nicht gelöscht werden. Discord löscht per Bulk-Delete nur neuere Nachrichten.');
+      } else if (interaction.commandName === WARN_COMMAND) {
+        await interaction.editReply('Warnung konnte nicht erstellt werden.');
+      } else if (interaction.commandName === WARNINGS_COMMAND) {
+        await interaction.editReply('Warnungen konnten nicht geladen werden.');
+      } else if (interaction.commandName === REMIND_COMMAND) {
+        await interaction.editReply('Reminder konnte nicht erstellt werden.');
+      } else if (interaction.commandName === SCANNER_STATE_RESET_COMMAND) {
         await interaction.editReply('Scanner-State konnte nicht zurückgesetzt werden.');
       } else if (interaction.commandName === FORCE_RESCAN_COMMAND) {
         await interaction.editReply('Force-Rescan konnte nicht gestartet werden.');
