@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { env } from '../../config/env.js';
+import { env } from '../../app/env/index.js';
 
 const DEFAULT_ADMIN_STATE_PATH = path.resolve(process.cwd(), 'data/discord-admin-state.json');
 

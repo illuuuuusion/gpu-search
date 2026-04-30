@@ -25,16 +25,24 @@ Node.js/TypeScript-Grundgerüst für eine GPU-Watchlist mit:
 ## Projektstruktur
 
 ```txt
-config/
-  gpu-profiles.json
 src/
-  config/
-  core/
+  app/
+    bootstrap.ts
+    env/
+    shared/
+  domains/
+    gpu/
+      application/
+      config/
+      domain/
+      infrastructure/
+    valorant/
   integrations/
-    ebay/
     discord/
-  types/
-  utils/
+  scripts/
+    gpu/
+    valorant/
+    ops/
 ```
 
 ## Schnellstart

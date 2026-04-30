@@ -1,7 +1,7 @@
 import { once } from 'node:events';
 import { ActionRowBuilder, ActivityType, ButtonBuilder, ButtonStyle, Client, DiscordAPIError, EmbedBuilder, Events, GatewayIntentBits, ModalBuilder, MessageFlags, PermissionFlagsBits, SlashCommandBuilder, StringSelectMenuBuilder, TextInputBuilder, TextInputStyle, } from 'discord.js';
-import { env } from '../../config/env.js';
-import { logger } from '../../utils/logger.js';
+import { env } from '../../app/env/index.js';
+import { logger } from '../../app/shared/logger.js';
 import { DiscordAdminStateStore } from './adminState.js';
 import { formatGuildConfigSummary, parseReminderDuration, renderWelcomeTemplate } from './adminUtils.js';
 const DISCORD_ACTIVITY_NAME = 'eBay GPU-Deals';
@@ -29,11 +29,14 @@ const COMP_BUILDER_COMMAND = 'compbuilder';
 const COMP_BUILDER_PREFIX = 'vct-comp';
 const COMP_BUILDER_PRESET_MODAL_PREFIX = 'vct-comp-preset';
 const ALERT_FOOTER_TEXT = 'GPU-Search';
+const GPU_ALERT_FOOTER_PREFIX = `${ALERT_FOOTER_TEXT} • GPU Alert`;
 const AUTOMATIC_SCAN_STATUS_FOOTER_TEXT = 'GPU-Search • Auto-Scan-Status';
 const MARKET_DIGEST_FOOTER_TEXT = 'GPU-Search • Markt-Zusammenfassung';
 const VALORANT_SYNC_FOOTER_TEXT = 'GPU-Search • VALORANT Meta Update';
 const MODERATION_LOG_FOOTER_TEXT = 'GPU-Search • Moderation';
 const POLL_EMOJIS = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣'];
+const GPU_ALERT_HISTORY_PAGE_SIZE = 100;
+const GPU_ALERT_HISTORY_MAX_PAGES = 10;
 const DISCORD_ADMIN_USER_IDS = new Set([
     '504707482547912714',
     '689513442867937321',
@@ -102,6 +105,27 @@ function formatConfidenceLabel(games) {
         return 'solide Daten';
     }
     return 'kleine Stichprobe';
+}
+function buildGpuAlertFooterText(listingId, suffix) {
+    const encodedListingId = encodeURIComponent(listingId);
+    return suffix
+        ? `${GPU_ALERT_FOOTER_PREFIX} • listingId=${encodedListingId} • ${suffix}`
+        : `${GPU_ALERT_FOOTER_PREFIX} • listingId=${encodedListingId}`;
+}
+function parseGpuAlertListingId(footerText) {
+    if (!footerText || !footerText.startsWith(GPU_ALERT_FOOTER_PREFIX)) {
+        return null;
+    }
+    const match = footerText.match(/listingId=([^\s•]+)/);
+    if (!match?.[1]) {
+        return null;
+    }
+    try {
+        return decodeURIComponent(match[1]);
+    }
+    catch {
+        return null;
+    }
 }
 function formatCompBuilderFilters(snapshot) {
     const filters = [];
@@ -547,6 +571,38 @@ export class DiscordNotifier {
             channelId: sentMessage.channelId,
         };
     }
+    async listActiveGpuListingIds() {
+        await this.start();
+        const channel = await this.fetchMessageChannel();
+        const listingIds = new Set();
+        let before;
+        for (let page = 0; page < GPU_ALERT_HISTORY_MAX_PAGES; page += 1) {
+            const messages = await channel.messages.fetch({
+                limit: GPU_ALERT_HISTORY_PAGE_SIZE,
+                ...(before ? { before } : {}),
+            });
+            if (messages.size === 0) {
+                break;
+            }
+            for (const message of messages.values()) {
+                if (message.author.id !== this.client.user?.id) {
+                    continue;
+                }
+                const listingId = parseGpuAlertListingId(message.embeds[0]?.footer?.text);
+                if (listingId) {
+                    listingIds.add(listingId);
+                }
+            }
+            if (messages.size < GPU_ALERT_HISTORY_PAGE_SIZE) {
+                break;
+            }
+            before = messages.last()?.id;
+            if (!before) {
+                break;
+            }
+        }
+        return Array.from(listingIds);
+    }
     async sendScanStatus(message) {
         await this.start();
         await this.waitForSendWindow();
@@ -645,9 +701,14 @@ export class DiscordNotifier {
             const embed = existingEmbed
                 ? EmbedBuilder.from(existingEmbed)
                 : new EmbedBuilder();
+            const listingId = parseGpuAlertListingId(existingEmbed?.footer?.text);
             embed
                 .setColor(0xFEE75C)
-                .setFooter({ text: `${ALERT_FOOTER_TEXT} • Angebot nicht mehr verfügbar` })
+                .setFooter({
+                text: listingId
+                    ? buildGpuAlertFooterText(listingId, 'Angebot nicht mehr verfügbar')
+                    : `${ALERT_FOOTER_TEXT} • Angebot nicht mehr verfügbar`,
+            })
                 .addFields({
                 name: 'Status',
                 value: `Nicht mehr verfügbar (${details.reason})\nZuletzt geprüft: ${formatDiscordTimestamp(details.checkedAt)}`,
@@ -682,7 +743,7 @@ export class DiscordNotifier {
             .setURL(message.url)
             .setDescription(message.description)
             .addFields(message.fields)
-            .setFooter({ text: ALERT_FOOTER_TEXT });
+            .setFooter({ text: message.listingId ? buildGpuAlertFooterText(message.listingId) : ALERT_FOOTER_TEXT });
         if (message.imageUrl) {
             embed.setImage(message.imageUrl);
         }

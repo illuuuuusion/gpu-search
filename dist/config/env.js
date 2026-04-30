@@ -30,6 +30,7 @@ const envSchema = z.object({
     GEIZHALS_PROFILE_DELAY_MS: z.coerce.number().default(750),
     GEIZHALS_BROWSER_HEADLESS: booleanFromString.default(true),
     GEIZHALS_BROWSER_ENGINE: z.enum(['auto', 'chromium', 'firefox', 'webkit']).default('auto'),
+    GEIZHALS_CHALLENGE_COOLDOWN_MINUTES: z.coerce.number().min(1).max(1440).default(180),
     NOTIFIER_PROVIDER: z.enum(['console', 'discord']).default('console'),
     DISCORD_BOT_TOKEN: optionalString,
     DISCORD_CHANNEL_ID: optionalString,

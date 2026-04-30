@@ -673,6 +673,9 @@ async function fetchGeizhalsReference(page, profile) {
         }
         catch (error) {
             const message = error instanceof Error ? error.message : 'unknown_error';
+            if (message === 'geizhals_blocked_by_challenge') {
+                throw error;
+            }
             logger.warn({ profile: profile.name, familyUrl: familyLink.url, error: message }, 'Failed to parse Geizhals family page');
         }
     }
@@ -810,6 +813,7 @@ export class GeizhalsReferenceService {
     refreshPromise = null;
     refreshTimer = null;
     cacheLoaded = false;
+    challengeCooldownUntil;
     async start(profiles) {
         await this.ensureCacheLoaded();
         for (const profile of profiles) {
@@ -893,6 +897,15 @@ export class GeizhalsReferenceService {
             return;
         }
         await this.ensureCacheLoaded();
+        const cooldownUntilMs = this.challengeCooldownUntil
+            ? Date.parse(this.challengeCooldownUntil)
+            : Number.NaN;
+        if (!Number.isNaN(cooldownUntilMs) && cooldownUntilMs > Date.now()) {
+            logger.warn({
+                cooldownUntil: this.challengeCooldownUntil,
+            }, 'Skipping Geizhals refresh because challenge cooldown is active');
+            return;
+        }
         this.refreshPromise = (async () => {
             logger.info({ profiles: profiles.length }, 'Refreshing Geizhals market references');
             const nextReferences = new Map(this.references);
@@ -929,18 +942,14 @@ export class GeizhalsReferenceService {
                             if (override) {
                                 nextReferences.set(profile.name, override);
                             }
-                            await page?.close().catch(() => undefined);
-                            await browser?.close().catch(() => undefined);
-                            page = undefined;
-                            browser = undefined;
-                            try {
-                                ({ browser, page } = await openReferencePage());
-                            }
-                            catch (restartError) {
-                                const restartMessage = restartError instanceof Error ? restartError.message : 'unknown_error';
-                                logger.warn({ profile: profile.name, error: restartMessage }, 'Unable to restart browser after Geizhals challenge');
-                                break;
-                            }
+                            const cooldownUntil = new Date(Date.now() + env.GEIZHALS_CHALLENGE_COOLDOWN_MINUTES * 60 * 1000).toISOString();
+                            this.challengeCooldownUntil = cooldownUntil;
+                            logger.warn({
+                                profile: profile.name,
+                                cooldownUntil,
+                                cooldownMinutes: env.GEIZHALS_CHALLENGE_COOLDOWN_MINUTES,
+                            }, 'Geizhals challenge detected, aborting refresh and keeping cached references');
+                            break;
                         }
                     }
                     finally {
