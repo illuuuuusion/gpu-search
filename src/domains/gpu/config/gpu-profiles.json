@@ -56,7 +56,6 @@
     "vramVariants": false,
     "excludeNew": true,
     "onlyGermany": false,
-    "minimumRetailDiscountPercent": 10,
     "prices": {
       "buyNowWorking": 650,
       "buyNowDefect": 154,
@@ -73,7 +72,6 @@
     "vramVariants": true,
     "excludeNew": true,
     "onlyGermany": false,
-    "minimumRetailDiscountPercent": 15,
     "prices": {
       "buyNowWorking": 160,
       "buyNowDefect": 50,
@@ -269,7 +267,6 @@
     "vramVariants": false,
     "excludeNew": true,
     "onlyGermany": false,
-    "minimumRetailDiscountPercent": 10,
     "prices": {
       "buyNowWorking": 245,
       "buyNowDefect": 70,
@@ -286,7 +283,6 @@
     "vramVariants": true,
     "excludeNew": true,
     "onlyGermany": false,
-    "minimumRetailDiscountPercent": 10,
     "prices": {
       "buyNowWorking": 300,
       "buyNowDefect": 80,
@@ -303,7 +299,6 @@
     "vramVariants": true,
     "excludeNew": true,
     "onlyGermany": false,
-    "minimumRetailDiscountPercent": 10,
     "prices": {
       "buyNowWorking": 360,
       "buyNowDefect": 100,
@@ -320,7 +315,6 @@
     "vramVariants": false,
     "excludeNew": true,
     "onlyGermany": false,
-    "minimumRetailDiscountPercent": 10,
     "prices": {
       "buyNowWorking": 430,
       "buyNowDefect": 115,
@@ -337,7 +331,6 @@
     "vramVariants": false,
     "excludeNew": true,
     "onlyGermany": false,
-    "minimumRetailDiscountPercent": 10,
     "prices": {
       "buyNowWorking": 470,
       "buyNowDefect": 125,
@@ -354,7 +347,6 @@
     "vramVariants": false,
     "excludeNew": true,
     "onlyGermany": false,
-    "minimumRetailDiscountPercent": 10,
     "prices": {
       "buyNowWorking": 520,
       "buyNowDefect": 130,
@@ -371,7 +363,6 @@
     "vramVariants": false,
     "excludeNew": true,
     "onlyGermany": false,
-    "minimumRetailDiscountPercent": 10,
     "prices": {
       "buyNowWorking": 620,
       "buyNowDefect": 155,
@@ -388,7 +379,6 @@
     "vramVariants": false,
     "excludeNew": true,
     "onlyGermany": false,
-    "minimumRetailDiscountPercent": 10,
     "prices": {
       "buyNowWorking": 650,
       "buyNowDefect": 190,
@@ -405,7 +395,6 @@
     "vramVariants": false,
     "excludeNew": true,
     "onlyGermany": false,
-    "minimumRetailDiscountPercent": 10,
     "prices": {
       "buyNowWorking": 700,
       "buyNowDefect": 210,
@@ -422,7 +411,6 @@
     "vramVariants": false,
     "excludeNew": true,
     "onlyGermany": false,
-    "minimumRetailDiscountPercent": 10,
     "prices": {
       "buyNowWorking": 1200,
       "buyNowDefect": 320,
@@ -439,7 +427,6 @@
     "vramVariants": false,
     "excludeNew": true,
     "onlyGermany": false,
-    "minimumRetailDiscountPercent": 10,
     "prices": {
       "buyNowWorking": 230,
       "buyNowDefect": 90,
@@ -456,7 +443,6 @@
     "vramVariants": true,
     "excludeNew": true,
     "onlyGermany": false,
-    "minimumRetailDiscountPercent": 10,
     "prices": {
       "buyNowWorking": 250,
       "buyNowDefect": 105,
@@ -473,7 +459,6 @@
     "vramVariants": true,
     "excludeNew": true,
     "onlyGermany": false,
-    "minimumRetailDiscountPercent": 10,
     "prices": {
       "buyNowWorking": 300,
       "buyNowDefect": 110,
@@ -490,7 +475,6 @@
     "vramVariants": false,
     "excludeNew": true,
     "onlyGermany": false,
-    "minimumRetailDiscountPercent": 10,
     "prices": {
       "buyNowWorking": 480,
       "buyNowDefect": 165,
@@ -507,7 +491,6 @@
     "vramVariants": false,
     "excludeNew": true,
     "onlyGermany": false,
-    "minimumRetailDiscountPercent": 10,
     "prices": {
       "buyNowWorking": 600,
       "buyNowDefect": 210,
@@ -524,7 +507,6 @@
     "vramVariants": false,
     "excludeNew": true,
     "onlyGermany": false,
-    "minimumRetailDiscountPercent": 10,
     "prices": {
       "buyNowWorking": 880,
       "buyNowDefect": 275,
@@ -541,7 +523,6 @@
     "vramVariants": false,
     "excludeNew": true,
     "onlyGermany": false,
-    "minimumRetailDiscountPercent": 10,
     "prices": {
       "buyNowWorking": 1750,
       "buyNowDefect": 530,
@@ -606,7 +587,6 @@
     "vramVariants": false,
     "excludeNew": true,
     "onlyGermany": false,
-    "minimumRetailDiscountPercent": 10,
     "prices": {
       "buyNowWorking": 290,
       "buyNowDefect": 160,
@@ -623,7 +603,6 @@
     "vramVariants": false,
     "excludeNew": true,
     "onlyGermany": false,
-    "minimumRetailDiscountPercent": 10,
     "prices": {
       "buyNowWorking": 350,
       "buyNowDefect": 220,
@@ -640,7 +619,6 @@
     "vramVariants": false,
     "excludeNew": true,
     "onlyGermany": false,
-    "minimumRetailDiscountPercent": 10,
     "prices": {
       "buyNowWorking": 430,
       "buyNowDefect": 220,
@@ -657,7 +635,6 @@
     "vramVariants": false,
     "excludeNew": true,
     "onlyGermany": false,
-    "minimumRetailDiscountPercent": 10,
     "prices": {
       "buyNowWorking": 520,
       "buyNowDefect": 280,
@@ -674,7 +651,6 @@
     "vramVariants": false,
     "excludeNew": true,
     "onlyGermany": false,
-    "minimumRetailDiscountPercent": 10,
     "prices": {
       "buyNowWorking": 510,
       "buyNowDefect": 250,
@@ -691,7 +667,6 @@
     "vramVariants": false,
     "excludeNew": true,
     "onlyGermany": false,
-    "minimumRetailDiscountPercent": 10,
     "prices": {
       "buyNowWorking": 590,
       "buyNowDefect": 250,

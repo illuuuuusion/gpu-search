@@ -18,49 +18,7 @@ export interface GpuProfile {
   vramVariants: boolean;
   excludeNew: boolean;
   onlyGermany: boolean;
-  minimumRetailDiscountPercent?: number;
   prices: PriceLimits;
-}
-
-export interface MarketReferenceVariant {
-  title: string;
-  lowestPriceEur: number;
-  offerCount?: number;
-}
-
-export interface MarketReferenceFamily {
-  title: string;
-  url: string;
-  lowestPriceEur: number;
-  offerCount?: number;
-  variants: MarketReferenceVariant[];
-}
-
-export interface MarketReference {
-  source: 'geizhals' | 'billiger' | 'guenstiger' | 'composite' | 'override';
-  query: string;
-  url: string;
-  lowestPriceEur: number;
-  fetchedAt: string;
-  families: MarketReferenceFamily[];
-  note?: string;
-}
-
-export interface MarketReferenceMatch {
-  reference: MarketReference;
-  family: MarketReferenceFamily;
-  variant?: MarketReferenceVariant;
-  priceEur: number;
-  marketLowestPriceEur: number;
-  marketMedianPriceEur: number;
-  familyLowestPriceEur: number;
-  familyMedianPriceEur: number;
-  brandMatchedPriceEur?: number;
-  pricingAnchor: 'brand_family_median' | 'family_median' | 'family_lowest' | 'market_median' | 'market_lowest';
-  strategy: 'title_variant' | 'price_proximity' | 'family_lowest';
-  similarityScore: number;
-  matchedTitle: string;
-  url: string;
 }
 
 export interface EbayListingAspect {
@@ -198,9 +156,6 @@ export interface EvaluatedListing {
   baseLimitEur: number;
   effectiveLimitEur: number;
   limitHeadroomPercent: number;
-  referenceMatch?: MarketReferenceMatch;
-  retailDiscountPercent?: number;
-  retailAnchorPriceEur?: number;
   repairability?: RepairabilityAssessment;
   marketStats?: ProfileMarketStats;
 }

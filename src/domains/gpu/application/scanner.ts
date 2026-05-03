@@ -7,7 +7,6 @@ import { checkListingAvailability, searchBucketListingsPage } from '../infrastru
 import type { GpuProfile } from '../domain/models.js';
 import type { Notifier } from '../../../app/shared/notifier/index.js';
 import type { EbayListing } from '../domain/models.js';
-import type { MarketReferenceReader } from '../infrastructure/market/types.js';
 import { logger } from '../../../app/shared/logger.js';
 import { env } from '../../../app/env/index.js';
 import { ScannerStateStore, type ScannerStateResetResult } from '../domain/scannerState.js';
@@ -51,10 +50,7 @@ export class ScannerService {
   private initializationPromise: Promise<void> | null = null;
   private currentRunPromise: Promise<ScannerRunSummary> | null = null;
 
-  constructor(
-    private readonly notifier: Notifier,
-    private readonly marketReferences?: MarketReferenceReader,
-  ) {}
+  constructor(private readonly notifier: Notifier) {}
 
   private async ensureInitialized(): Promise<void> {
     if (!this.initializationPromise) {
@@ -295,8 +291,7 @@ export class ScannerService {
         const match = selectProfileForListing(profiles, listing);
         if (!match) continue;
 
-        const referenceMatch = this.marketReferences?.matchReference(match.profile, listing);
-        const result = evaluateListing(match.profile, listing, referenceMatch, { evaluationMode });
+        const result = evaluateListing(match.profile, listing, { evaluationMode });
         if (!result.accepted) continue;
         acceptedListings += 1;
         const shouldSkipBecauseAlreadyPosted = options.ignoreSeen

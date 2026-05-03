@@ -9,7 +9,6 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/app/bootstrap.js",
     "test": "EBAY_PROVIDER=mock SCANNER_STATE_PATH=/tmp/gpu-search-test-scanner-state.json MARKET_SUMMARY_PATH=/tmp/gpu-search-test-market-summary.json npm run build && EBAY_PROVIDER=mock SCANNER_STATE_PATH=/tmp/gpu-search-test-scanner-state.json MARKET_SUMMARY_PATH=/tmp/gpu-search-test-market-summary.json sh -c 'node --test $(find dist -name \"*.test.js\")'",
-    "refresh:references": "node dist/scripts/gpu/refreshReferences.js",
     "reset:scanner-state": "node dist/scripts/gpu/resetScannerState.js",
     "test:mock-scan": "npm run build && node dist/scripts/gpu/testMockScan.js",
     "valorant:sync": "node dist/scripts/valorant/valorantSync.js",

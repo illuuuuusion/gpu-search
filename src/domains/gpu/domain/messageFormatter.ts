@@ -1,22 +1,6 @@
 import type { EvaluatedListing } from '../domain/models.js';
 import type { AlertMessage } from '../../../app/shared/notifier/index.js';
 
-const REFERENCE_SOURCE_LABELS = {
-  override: 'Fallback-Referenz',
-  billiger: 'billiger.de neu',
-  guenstiger: 'guenstiger.de neu',
-  composite: 'Preisvergleich neu',
-  geizhals: 'Legacy-Referenz',
-} as const;
-
-const PRICING_ANCHOR_LABELS = {
-  brand_family_median: 'Marke Median',
-  family_median: 'Modell Median',
-  family_lowest: 'Modell Tiefstpreis',
-  market_median: 'Markt Median',
-  market_lowest: 'Markt Tiefstpreis',
-} as const;
-
 function percentDelta(referencePrice: number | undefined, actualPrice: number): number | undefined {
   if (!referencePrice || referencePrice <= 0) {
     return undefined;
@@ -66,60 +50,6 @@ export function formatListingMessage(result: EvaluatedListing): AlertMessage {
       { name: 'Repair-Confidence', value: result.repairability.confidence, inline: true },
       { name: 'Repair-Hinweise', value: result.repairability.reasons.slice(0, 4).join(', '), inline: false },
     );
-  }
-
-  if (result.referenceMatch) {
-    const referenceLabel = REFERENCE_SOURCE_LABELS[result.referenceMatch.reference.source];
-
-    fields.push(
-      { name: referenceLabel, value: `${result.referenceMatch.priceEur.toFixed(2)} €`, inline: true },
-      {
-        name: 'Rabatt vs Referenz',
-        value: `${(result.retailDiscountPercent ?? 0).toFixed(2)}%`,
-        inline: true,
-      },
-      {
-        name: 'Preisanker',
-        value: PRICING_ANCHOR_LABELS[result.referenceMatch.pricingAnchor],
-        inline: true,
-      },
-      {
-        name: 'Referenz-Match',
-        value: result.referenceMatch.strategy,
-        inline: true,
-      },
-      {
-        name: 'Referenz-Modell',
-        value: result.referenceMatch.matchedTitle,
-        inline: false,
-      },
-      {
-        name: 'Markt Median',
-        value: `${result.referenceMatch.marketMedianPriceEur.toFixed(2)} €`,
-        inline: true,
-      },
-      {
-        name: 'Markt Tiefstpreis',
-        value: `${result.referenceMatch.marketLowestPriceEur.toFixed(2)} €`,
-        inline: true,
-      },
-    );
-
-    if (result.referenceMatch.brandMatchedPriceEur) {
-      fields.push({
-        name: 'Marken-Median',
-        value: `${result.referenceMatch.brandMatchedPriceEur.toFixed(2)} €`,
-        inline: true,
-      });
-    }
-
-    if (result.referenceMatch.reference.source === 'override') {
-      fields.push({
-        name: 'Referenzquelle',
-        value: result.referenceMatch.reference.note ?? 'Manueller Override-Fallback',
-        inline: false,
-      });
-    }
   }
 
   if (result.marketStats) {

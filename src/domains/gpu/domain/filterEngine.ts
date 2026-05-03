@@ -1,6 +1,6 @@
 import { defectTerms, exclusionTerms } from '../config/exclusionTerms.js';
 import { env } from '../../../app/env/index.js';
-import type { EbayListing, EvaluatedListing, GpuProfile, ListingHealth, MarketReferenceMatch, OfferType } from '../domain/models.js';
+import type { EbayListing, EvaluatedListing, GpuProfile, ListingHealth, OfferType } from '../domain/models.js';
 import { assessRepairability } from './repairabilityScore.js';
 import { buildListingSearchText, getListingTextSources } from './listingSignals.js';
 
@@ -157,50 +157,27 @@ function effectiveLimitForListing(
   profile: GpuProfile,
   health: ListingHealth,
   offerType: OfferType,
-  referenceMatch?: MarketReferenceMatch,
   evaluationMode: 'normal' | 'debug' = 'normal',
 ): {
   baseLimitEur: number;
   effectiveLimitEur: number;
-  retailDiscountPercent?: number;
-  retailAnchorPriceEur?: number;
   limitHeadroomPercent: number;
 } {
   const baseLimitEur = Number((
     baseLimitForOfferType(offerType, profile, health) *
     (evaluationMode === 'debug' ? DEBUG_PRICE_LIMIT_MULTIPLIER : 1)
   ).toFixed(2));
-  const minimumRetailDiscountPercent = evaluationMode === 'debug'
-    ? 0
-    : (profile.minimumRetailDiscountPercent ?? 0);
-
-  let effectiveLimitEur = baseLimitEur;
-  let retailDiscountPercent: number | undefined;
-  let retailAnchorPriceEur: number | undefined;
-
-  if (health === 'WORKING' && minimumRetailDiscountPercent > 0 && referenceMatch?.priceEur) {
-    retailAnchorPriceEur = referenceMatch.priceEur;
-    retailDiscountPercent = calculatePercentDelta(retailAnchorPriceEur, listing.totalEur);
-    const retailGateLimit = Number((retailAnchorPriceEur * (1 - minimumRetailDiscountPercent / 100)).toFixed(2));
-    effectiveLimitEur = Math.min(baseLimitEur, retailGateLimit);
-  }
+  const effectiveLimitEur = baseLimitEur;
 
   return {
     baseLimitEur,
     effectiveLimitEur,
-    retailDiscountPercent,
-    retailAnchorPriceEur,
     limitHeadroomPercent: calculatePercentDelta(effectiveLimitEur, listing.totalEur),
   };
 }
 
-function scoreListing(priceEvaluation: {
-  retailDiscountPercent?: number;
-  retailAnchorPriceEur?: number;
-  limitHeadroomPercent: number;
-}): number {
-  const marketSignal = priceEvaluation.retailDiscountPercent ?? priceEvaluation.limitHeadroomPercent;
-  return Number(marketSignal.toFixed(2));
+function scoreListing(priceEvaluation: { limitHeadroomPercent: number }): number {
+  return Number(priceEvaluation.limitHeadroomPercent.toFixed(2));
 }
 
 function rejectedResult(
@@ -225,7 +202,6 @@ function rejectedResult(
 export function evaluateListing(
   profile: GpuProfile,
   listing: EbayListing,
-  referenceMatch?: MarketReferenceMatch,
   options: { evaluationMode?: 'normal' | 'debug' } = {},
 ): EvaluatedListing {
   const evaluationMode = options.evaluationMode ?? 'normal';
@@ -305,7 +281,6 @@ export function evaluateListing(
     profile,
     healthResult.health,
     offerType,
-    referenceMatch,
     evaluationMode,
   );
   const accepted = acceptedForOfferType(offerType, listing, priceEvaluation.effectiveLimitEur);
@@ -325,9 +300,6 @@ export function evaluateListing(
     baseLimitEur: priceEvaluation.baseLimitEur,
     effectiveLimitEur: priceEvaluation.effectiveLimitEur,
     limitHeadroomPercent: priceEvaluation.limitHeadroomPercent,
-    referenceMatch,
-    retailDiscountPercent: priceEvaluation.retailDiscountPercent,
-    retailAnchorPriceEur: priceEvaluation.retailAnchorPriceEur,
     repairability,
   };
 }
