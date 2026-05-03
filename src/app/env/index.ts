@@ -19,6 +19,11 @@ const booleanFromString = z.preprocess(
   z.boolean(),
 );
 
+const marketReferenceProvider = z.preprocess(
+  value => value === 'geizhals' ? 'composite' : value,
+  z.enum(['none', 'billiger', 'guenstiger', 'composite']),
+);
+
 const envSchema = z.object({
   EBAY_PROVIDER: z.enum(['live', 'sandbox', 'mock']).default('live'),
   EBAY_APP_ID: optionalString,
@@ -26,17 +31,39 @@ const envSchema = z.object({
   EBAY_MARKETPLACE_ID: z.string().default('EBAY_DE'),
   EBAY_SEARCH_PAGE_SIZE: z.coerce.number().default(200),
   EBAY_MAX_PAGES_PER_BUCKET: z.coerce.number().default(3),
-  MARKET_REFERENCE_PROVIDER: z.enum(['none', 'geizhals']).default('geizhals'),
-  MARKET_REFERENCE_CACHE_PATH: optionalString,
+  MARKET_REFERENCE_PROVIDER: marketReferenceProvider.default('composite'),
+  MARKET_REFERENCE_PROVIDERS: z.string().default('billiger,guenstiger'),
+  MARKET_REFERENCE_CACHE_DIR: optionalString,
   MARKET_REFERENCE_REFRESH_HOUR: z.coerce.number().min(0).max(23).default(1),
   MARKET_REFERENCE_CACHE_MAX_AGE_HOURS: z.coerce.number().default(30),
-  GEIZHALS_REQUEST_TIMEOUT_MS: z.coerce.number().default(30000),
-  GEIZHALS_MAX_FAMILY_LINKS_PER_PROFILE: z.coerce.number().default(12),
-  GEIZHALS_VARIANT_MATCH_THRESHOLD: z.coerce.number().default(0.42),
-  GEIZHALS_PROFILE_DELAY_MS: z.coerce.number().default(750),
-  GEIZHALS_BROWSER_HEADLESS: booleanFromString.default(true),
-  GEIZHALS_BROWSER_ENGINE: z.enum(['auto', 'chromium', 'firefox', 'webkit']).default('auto'),
-  GEIZHALS_CHALLENGE_COOLDOWN_MINUTES: z.coerce.number().min(1).max(1440).default(180),
+  MARKET_REFERENCE_VARIANT_MATCH_THRESHOLD: z.coerce.number().default(0.42),
+  MARKET_REFERENCE_REQUEST_TIMEOUT_MS: z.coerce.number().min(500).max(120_000).default(15_000),
+  BILLIGER_REFERENCE_SOURCE: z.enum(['disabled', 'file', 'http']).default('disabled'),
+  BILLIGER_REFERENCE_FILE_PATH: optionalString,
+  BILLIGER_REFERENCE_URL: optionalString,
+  BILLIGER_REFERENCE_AUTH_TOKEN: optionalString,
+  BILLIGER_REFERENCE_AUTH_HEADER: z.string().default('Authorization'),
+  BILLIGER_IMPORT_SOURCE: z.enum(['disabled', 'file', 'http']).default('disabled'),
+  BILLIGER_IMPORT_FORMAT: z.enum(['json', 'jsonl', 'csv', 'xml']).default('json'),
+  BILLIGER_IMPORT_INPUT_PATH: optionalString,
+  BILLIGER_IMPORT_URL: optionalString,
+  BILLIGER_IMPORT_AUTH_TOKEN: optionalString,
+  BILLIGER_IMPORT_AUTH_HEADER: z.string().default('Authorization'),
+  BILLIGER_IMPORT_USERNAME: optionalString,
+  BILLIGER_IMPORT_PASSWORD: optionalString,
+  GUENSTIGER_REFERENCE_SOURCE: z.enum(['disabled', 'file', 'http']).default('disabled'),
+  GUENSTIGER_REFERENCE_FILE_PATH: optionalString,
+  GUENSTIGER_REFERENCE_URL: optionalString,
+  GUENSTIGER_REFERENCE_AUTH_TOKEN: optionalString,
+  GUENSTIGER_REFERENCE_AUTH_HEADER: z.string().default('Authorization'),
+  GUENSTIGER_IMPORT_SOURCE: z.enum(['disabled', 'file', 'http']).default('disabled'),
+  GUENSTIGER_IMPORT_FORMAT: z.enum(['json', 'jsonl', 'csv', 'xml']).default('json'),
+  GUENSTIGER_IMPORT_INPUT_PATH: optionalString,
+  GUENSTIGER_IMPORT_URL: optionalString,
+  GUENSTIGER_IMPORT_AUTH_TOKEN: optionalString,
+  GUENSTIGER_IMPORT_AUTH_HEADER: z.string().default('Authorization'),
+  GUENSTIGER_IMPORT_USERNAME: optionalString,
+  GUENSTIGER_IMPORT_PASSWORD: optionalString,
   NOTIFIER_PROVIDER: z.enum(['console', 'discord']).default('console'),
   DISCORD_BOT_TOKEN: optionalString,
   DISCORD_CHANNEL_ID: optionalString,
@@ -91,17 +118,39 @@ interface AppEnv {
   EBAY_MARKETPLACE_ID: string;
   EBAY_SEARCH_PAGE_SIZE: number;
   EBAY_MAX_PAGES_PER_BUCKET: number;
-  MARKET_REFERENCE_PROVIDER: 'none' | 'geizhals';
-  MARKET_REFERENCE_CACHE_PATH?: string;
+  MARKET_REFERENCE_PROVIDER: 'none' | 'billiger' | 'guenstiger' | 'composite';
+  MARKET_REFERENCE_PROVIDERS: string;
+  MARKET_REFERENCE_CACHE_DIR?: string;
   MARKET_REFERENCE_REFRESH_HOUR: number;
   MARKET_REFERENCE_CACHE_MAX_AGE_HOURS: number;
-  GEIZHALS_REQUEST_TIMEOUT_MS: number;
-  GEIZHALS_MAX_FAMILY_LINKS_PER_PROFILE: number;
-  GEIZHALS_VARIANT_MATCH_THRESHOLD: number;
-  GEIZHALS_PROFILE_DELAY_MS: number;
-  GEIZHALS_BROWSER_HEADLESS: boolean;
-  GEIZHALS_BROWSER_ENGINE: 'auto' | 'chromium' | 'firefox' | 'webkit';
-  GEIZHALS_CHALLENGE_COOLDOWN_MINUTES: number;
+  MARKET_REFERENCE_VARIANT_MATCH_THRESHOLD: number;
+  MARKET_REFERENCE_REQUEST_TIMEOUT_MS: number;
+  BILLIGER_REFERENCE_SOURCE: 'disabled' | 'file' | 'http';
+  BILLIGER_REFERENCE_FILE_PATH?: string;
+  BILLIGER_REFERENCE_URL?: string;
+  BILLIGER_REFERENCE_AUTH_TOKEN?: string;
+  BILLIGER_REFERENCE_AUTH_HEADER: string;
+  BILLIGER_IMPORT_SOURCE: 'disabled' | 'file' | 'http';
+  BILLIGER_IMPORT_FORMAT: 'json' | 'jsonl' | 'csv' | 'xml';
+  BILLIGER_IMPORT_INPUT_PATH?: string;
+  BILLIGER_IMPORT_URL?: string;
+  BILLIGER_IMPORT_AUTH_TOKEN?: string;
+  BILLIGER_IMPORT_AUTH_HEADER: string;
+  BILLIGER_IMPORT_USERNAME?: string;
+  BILLIGER_IMPORT_PASSWORD?: string;
+  GUENSTIGER_REFERENCE_SOURCE: 'disabled' | 'file' | 'http';
+  GUENSTIGER_REFERENCE_FILE_PATH?: string;
+  GUENSTIGER_REFERENCE_URL?: string;
+  GUENSTIGER_REFERENCE_AUTH_TOKEN?: string;
+  GUENSTIGER_REFERENCE_AUTH_HEADER: string;
+  GUENSTIGER_IMPORT_SOURCE: 'disabled' | 'file' | 'http';
+  GUENSTIGER_IMPORT_FORMAT: 'json' | 'jsonl' | 'csv' | 'xml';
+  GUENSTIGER_IMPORT_INPUT_PATH?: string;
+  GUENSTIGER_IMPORT_URL?: string;
+  GUENSTIGER_IMPORT_AUTH_TOKEN?: string;
+  GUENSTIGER_IMPORT_AUTH_HEADER: string;
+  GUENSTIGER_IMPORT_USERNAME?: string;
+  GUENSTIGER_IMPORT_PASSWORD?: string;
   NOTIFIER_PROVIDER: 'console' | 'discord';
   DISCORD_BOT_TOKEN: string;
   DISCORD_CHANNEL_ID: string;

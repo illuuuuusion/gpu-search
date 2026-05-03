@@ -37,7 +37,7 @@ export interface MarketReferenceFamily {
 }
 
 export interface MarketReference {
-  source: 'geizhals' | 'override';
+  source: 'geizhals' | 'billiger' | 'guenstiger' | 'composite' | 'override';
   query: string;
   url: string;
   lowestPriceEur: number;
@@ -51,6 +51,12 @@ export interface MarketReferenceMatch {
   family: MarketReferenceFamily;
   variant?: MarketReferenceVariant;
   priceEur: number;
+  marketLowestPriceEur: number;
+  marketMedianPriceEur: number;
+  familyLowestPriceEur: number;
+  familyMedianPriceEur: number;
+  brandMatchedPriceEur?: number;
+  pricingAnchor: 'brand_family_median' | 'family_median' | 'family_lowest' | 'market_median' | 'market_lowest';
   strategy: 'title_variant' | 'price_proximity' | 'family_lowest';
   similarityScore: number;
   matchedTitle: string;
@@ -194,6 +200,7 @@ export interface EvaluatedListing {
   limitHeadroomPercent: number;
   referenceMatch?: MarketReferenceMatch;
   retailDiscountPercent?: number;
+  retailAnchorPriceEur?: number;
   repairability?: RepairabilityAssessment;
   marketStats?: ProfileMarketStats;
 }

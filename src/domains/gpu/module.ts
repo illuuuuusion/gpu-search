@@ -3,7 +3,7 @@ import { loadProfiles } from './domain/profileLoader.js';
 import { ScanScheduler, type ManualScanTriggerResult } from './application/scanScheduler.js';
 import { ScannerService } from './application/scanner.js';
 import type { MarketDashboardSnapshot, GpuProfile } from './domain/models.js';
-import type { MarketReferenceReader } from './infrastructure/geizhals/referenceService.js';
+import type { MarketReferenceReader } from './infrastructure/market/types.js';
 import type { Notifier } from '../../app/shared/notifier/index.js';
 import type { BotCommandBindings } from '../../app/shared/botBindings.js';
 import { logger } from '../../app/shared/logger.js';

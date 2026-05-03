@@ -7,7 +7,7 @@ import { checkListingAvailability, searchBucketListingsPage } from '../infrastru
 import type { GpuProfile } from '../domain/models.js';
 import type { Notifier } from '../../../app/shared/notifier/index.js';
 import type { EbayListing } from '../domain/models.js';
-import type { MarketReferenceReader } from '../infrastructure/geizhals/referenceService.js';
+import type { MarketReferenceReader } from '../infrastructure/market/types.js';
 import { logger } from '../../../app/shared/logger.js';
 import { env } from '../../../app/env/index.js';
 import { ScannerStateStore, type ScannerStateResetResult } from '../domain/scannerState.js';

@@ -4,6 +4,7 @@ import path from 'node:path';
 async function main(): Promise<void> {
   process.env.EBAY_PROVIDER ??= 'mock';
   process.env.MARKET_REFERENCE_PROVIDER ??= 'none';
+  process.env.NOTIFIER_PROVIDER ??= 'console';
   process.env.SCANNER_STATE_PATH ??= path.resolve(process.cwd(), 'data/scanner-state.test.json');
 
   if ((process.env.RESET_TEST_STATE ?? 'true').toLowerCase() !== 'false') {

@@ -163,6 +163,7 @@ function effectiveLimitForListing(
   baseLimitEur: number;
   effectiveLimitEur: number;
   retailDiscountPercent?: number;
+  retailAnchorPriceEur?: number;
   limitHeadroomPercent: number;
 } {
   const baseLimitEur = Number((
@@ -175,10 +176,12 @@ function effectiveLimitForListing(
 
   let effectiveLimitEur = baseLimitEur;
   let retailDiscountPercent: number | undefined;
+  let retailAnchorPriceEur: number | undefined;
 
   if (health === 'WORKING' && minimumRetailDiscountPercent > 0 && referenceMatch?.priceEur) {
-    retailDiscountPercent = calculatePercentDelta(referenceMatch.priceEur, listing.totalEur);
-    const retailGateLimit = Number((referenceMatch.priceEur * (1 - minimumRetailDiscountPercent / 100)).toFixed(2));
+    retailAnchorPriceEur = referenceMatch.priceEur;
+    retailDiscountPercent = calculatePercentDelta(retailAnchorPriceEur, listing.totalEur);
+    const retailGateLimit = Number((retailAnchorPriceEur * (1 - minimumRetailDiscountPercent / 100)).toFixed(2));
     effectiveLimitEur = Math.min(baseLimitEur, retailGateLimit);
   }
 
@@ -186,15 +189,18 @@ function effectiveLimitForListing(
     baseLimitEur,
     effectiveLimitEur,
     retailDiscountPercent,
+    retailAnchorPriceEur,
     limitHeadroomPercent: calculatePercentDelta(effectiveLimitEur, listing.totalEur),
   };
 }
 
 function scoreListing(priceEvaluation: {
   retailDiscountPercent?: number;
+  retailAnchorPriceEur?: number;
   limitHeadroomPercent: number;
 }): number {
-  return Number((priceEvaluation.retailDiscountPercent ?? priceEvaluation.limitHeadroomPercent).toFixed(2));
+  const marketSignal = priceEvaluation.retailDiscountPercent ?? priceEvaluation.limitHeadroomPercent;
+  return Number(marketSignal.toFixed(2));
 }
 
 function rejectedResult(
@@ -321,6 +327,7 @@ export function evaluateListing(
     limitHeadroomPercent: priceEvaluation.limitHeadroomPercent,
     referenceMatch,
     retailDiscountPercent: priceEvaluation.retailDiscountPercent,
+    retailAnchorPriceEur: priceEvaluation.retailAnchorPriceEur,
     repairability,
   };
 }

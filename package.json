@@ -11,12 +11,9 @@
     "test": "EBAY_PROVIDER=mock SCANNER_STATE_PATH=/tmp/gpu-search-test-scanner-state.json MARKET_SUMMARY_PATH=/tmp/gpu-search-test-market-summary.json npm run build && EBAY_PROVIDER=mock SCANNER_STATE_PATH=/tmp/gpu-search-test-scanner-state.json MARKET_SUMMARY_PATH=/tmp/gpu-search-test-market-summary.json sh -c 'node --test $(find dist -name \"*.test.js\")'",
     "refresh:references": "node dist/scripts/gpu/refreshReferences.js",
     "reset:scanner-state": "node dist/scripts/gpu/resetScannerState.js",
-    "test:mock-scan": "node dist/scripts/gpu/testMockScan.js",
+    "test:mock-scan": "npm run build && node dist/scripts/gpu/testMockScan.js",
     "valorant:sync": "node dist/scripts/valorant/valorantSync.js",
     "valorant:fixture-check": "node dist/scripts/valorant/valorantFixtureCheck.js",
-    "browser:doctor": "node dist/scripts/ops/browserDoctor.js",
-    "browser:prepare-libs": "node dist/scripts/ops/prepareChromiumHost.js",
-    "browser:install:firefox": "npx playwright install firefox",
     "lint": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
@@ -24,7 +21,6 @@
     "discord.js": "^14.26.3",
     "dotenv": "^16.5.0",
     "pino": "^9.7.0",
-    "playwright": "^1.59.1",
     "zod": "^3.24.4"
   },
   "devDependencies": {

@@ -2,14 +2,12 @@ import { GpuModule } from '../domains/gpu/module.js';
 import { ValorantModule } from '../domains/valorant/module.js';
 import { env } from './env/index.js';
 import { DiscordNotifier } from '../integrations/discord/notifier.js';
-import { GeizhalsReferenceService } from '../domains/gpu/infrastructure/geizhals/referenceService.js';
+import { createMarketReferenceService } from '../domains/gpu/infrastructure/market/factory.js';
 import { ConsoleNotifier } from './shared/notifier/index.js';
 import { logger } from './shared/logger.js';
 
 async function bootstrap(): Promise<void> {
-  const marketReferences = env.MARKET_REFERENCE_PROVIDER === 'geizhals'
-    ? new GeizhalsReferenceService()
-    : undefined;
+  const marketReferences = createMarketReferenceService();
   const gpuModule = new GpuModule(marketReferences);
   const valorantModule = env.VALORANT_ENABLED
     ? new ValorantModule()
@@ -44,6 +42,7 @@ async function bootstrap(): Promise<void> {
     ebayProvider: env.EBAY_PROVIDER,
     notifierProvider: env.NOTIFIER_PROVIDER,
     marketReferenceProvider: env.MARKET_REFERENCE_PROVIDER,
+    marketReferenceProviders: env.MARKET_REFERENCE_PROVIDERS,
     valorantEnabled: env.VALORANT_ENABLED,
   }, 'gpu-search started');
 
