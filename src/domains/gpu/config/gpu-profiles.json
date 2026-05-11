@@ -33,7 +33,7 @@
   },
   {
     "name": "Titan RTX",
-    "aliases": ["Titan RTX", "TITAN RTX"],
+    "aliases": ["Titan RTX"],
     "negativeAliases": [],
     "vramGb": 24,
     "category": "High-End / NVIDIA Turing",
