@@ -37,6 +37,7 @@ const MODERATION_LOG_FOOTER_TEXT = 'GPU-Search • Moderation';
 const POLL_EMOJIS = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣'];
 const GPU_ALERT_HISTORY_PAGE_SIZE = 100;
 const GPU_ALERT_HISTORY_MAX_PAGES = 10;
+const DELETE_COMMAND_MAX_MESSAGES = 1000;
 const DISCORD_ADMIN_USER_IDS = new Set([
     '504707482547912714',
     '689513442867937321',
@@ -827,6 +828,36 @@ export class DiscordNotifier {
             || Boolean(interaction.memberPermissions?.has(PermissionFlagsBits.Administrator))
             || Boolean(interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild));
     }
+    async deleteRecentChannelMessages(channel, amount) {
+        let deleted = 0;
+        let failed = 0;
+        let before;
+        while (deleted + failed < amount) {
+            const remaining = amount - deleted - failed;
+            const messages = await channel.messages.fetch({
+                limit: Math.min(100, remaining),
+                ...(before ? { before } : {}),
+            });
+            if (messages.size === 0) {
+                break;
+            }
+            for (const message of messages.values()) {
+                try {
+                    await message.delete();
+                    deleted += 1;
+                }
+                catch (error) {
+                    failed += 1;
+                    logger.warn({ error, messageId: message.id }, 'Failed to delete Discord message during admin cleanup');
+                }
+            }
+            before = messages.last()?.id;
+            if (!before || messages.size < Math.min(100, remaining)) {
+                break;
+            }
+        }
+        return { deleted, failed };
+    }
     async fetchLogChannel(guildId) {
         const config = this.adminState.getGuildConfig(guildId);
         if (!config.logChannelId) {
@@ -1104,10 +1135,10 @@ export class DiscordNotifier {
                 .setDescription('Löscht eine Anzahl der letzten Nachrichten im aktuellen Channel.')
                 .addIntegerOption(option => option
                 .setName('amount')
-                .setDescription('Anzahl der zu löschenden Nachrichten (1-100)')
+                .setDescription(`Anzahl der zu löschenden Nachrichten (1-${DELETE_COMMAND_MAX_MESSAGES})`)
                 .setRequired(true)
                 .setMinValue(1)
-                .setMaxValue(100))
+                .setMaxValue(DELETE_COMMAND_MAX_MESSAGES))
                 .toJSON(),
             new SlashCommandBuilder()
                 .setName(WARN_COMMAND)
@@ -1316,7 +1347,8 @@ export class DiscordNotifier {
             WARNINGS_COMMAND,
             REMIND_COMMAND,
         ].includes(interaction.commandName);
-        if (!isPublicValorantCommand && !DISCORD_ADMIN_USER_IDS.has(interaction.user.id)) {
+        const isAdminCommand = [POLL_COMMAND, DELETE_COMMAND, WARN_COMMAND].includes(interaction.commandName);
+        if (!isPublicValorantCommand && !DISCORD_ADMIN_USER_IDS.has(interaction.user.id) && !(isAdminCommand && this.isAdminUser(interaction))) {
             await interaction.reply({
                 content: 'Du bist für diesen Command nicht freigeschaltet.',
                 flags: MessageFlags.Ephemeral,
@@ -1461,12 +1493,15 @@ export class DiscordNotifier {
             }
             if (interaction.commandName === DELETE_COMMAND) {
                 const amount = interaction.options.getInteger('amount', true);
-                if (!interaction.channel || !interaction.channel.isTextBased() || !('bulkDelete' in interaction.channel)) {
+                if (!interaction.channel || !interaction.channel.isTextBased() || !('messages' in interaction.channel)) {
                     await interaction.editReply('Dieser Command funktioniert nur in Text-Channels.');
                     return;
                 }
-                const deletedMessages = await interaction.channel.bulkDelete(amount, true);
-                await interaction.editReply(`${deletedMessages.size} Nachrichten wurden gelöscht.`);
+                const result = await this.deleteRecentChannelMessages(interaction.channel, amount);
+                const failureSuffix = result.failed > 0
+                    ? ` ${result.failed} Nachrichten konnten nicht gelöscht werden; Details stehen im Bot-Log.`
+                    : '';
+                await interaction.editReply(`${result.deleted} Nachrichten wurden gelöscht.${failureSuffix}`);
                 return;
             }
             if (interaction.commandName === WARN_COMMAND) {
@@ -1635,7 +1670,7 @@ export class DiscordNotifier {
                 await interaction.editReply('Umfrage konnte nicht erstellt werden.');
             }
             else if (interaction.commandName === DELETE_COMMAND) {
-                await interaction.editReply('Nachrichten konnten nicht gelöscht werden. Discord löscht per Bulk-Delete nur neuere Nachrichten.');
+                await interaction.editReply('Nachrichten konnten nicht gelöscht werden. Prüfe bitte, ob der Bot Nachrichten verwalten darf.');
             }
             else if (interaction.commandName === WARN_COMMAND) {
                 await interaction.editReply('Warnung konnte nicht erstellt werden.');

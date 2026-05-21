@@ -41,6 +41,24 @@ const repairProfile: GpuProfile = {
   },
 };
 
+const workingProfile: GpuProfile = {
+  name: 'RTX 3090',
+  aliases: ['RTX 3090'],
+  negativeAliases: ['3090 Ti'],
+  vramGb: 24,
+  category: 'High-End / NVIDIA Ampere',
+  targetHealth: 'WORKING',
+  vramVariants: false,
+  excludeNew: true,
+  onlyGermany: false,
+  prices: {
+    buyNowWorking: 430,
+    buyNowDefect: 135,
+    auctionWorking: 385,
+    auctionDefect: 105,
+  },
+};
+
 test('evaluateListing accepts targeted repair listings below total price cap', () => {
   const listing = buildListing({
     title: 'GTX 1080 Ti defekt kein Bild startet noch',
@@ -89,4 +107,30 @@ test('evaluateListing gives low repairability scores to severe physical damage',
   assert.ok(result.repairability);
   assert.ok((result.repairability?.score ?? 100) <= 10);
   assert.match((result.repairability?.reasons ?? []).join(' '), /missing_core_parts/);
+});
+
+test('evaluateListing rejects hybrid cooler kits as GPU accessories', () => {
+  const listing = buildListing({
+    title: 'EVGA HYBRID Kit for RTX 3090 / 3080 Ti / 3080 FTW3 - Used - Working',
+    priceEur: 120,
+    shippingEur: 10,
+    totalEur: 130,
+  });
+
+  const result = evaluateListing(workingProfile, listing);
+  assert.equal(result.accepted, false);
+  assert.match(result.reasons.join(' '), /accessory_cooling/);
+});
+
+test('evaluateListing rejects GPU carrying cases as accessories', () => {
+  const listing = buildListing({
+    title: 'Tragetasche Grafikkarte EVA Material fuer RTX 5090 4090 3090 Wasserdicht',
+    priceEur: 59.39,
+    shippingEur: 0.92,
+    totalEur: 60.31,
+  });
+
+  const result = evaluateListing(workingProfile, listing);
+  assert.equal(result.accepted, false);
+  assert.match(result.reasons.join(' '), /accessory_misc/);
 });
