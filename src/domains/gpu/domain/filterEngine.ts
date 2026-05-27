@@ -17,7 +17,7 @@ const accessoryPatterns: Array<{ reason: string; regex: RegExp }> = [
   { reason: 'accessory_cable', regex: /\b(?:12vhpwr|16pin|8pin|pcie|pci-e|riser(?:-kabel|\s+cable)?|extension\s+cable|verlängerungskabel|splitter|converter|connector|oculink|dock)\b/i },
   { reason: 'accessory_packaging', regex: /\b(?:leerkarton|empty\s+box|box\s+only|ovp\s+only|nur\s+ovp|nur\s+verpackung|verpackung\s+ohne\s+inhalt)\b/i },
   { reason: 'accessory_av', regex: /\b(?:hdmi|displayport|dp\s*2\.1|usb-c|usb c)\s*(?:kabel|cable|adapter|switch|splitter|hub)\b/i },
-  { reason: 'accessory_misc', regex: /\b(?:storage\s+bag|carrying\s+case|carry\s+case|protective\s+case|bag|tragetasche|transporttasche|schutztasche|hardcase|eva\s+material|wasserdicht(?:e|er|es|en)?|waterproof|steam\s+code|code\s+steam|laptop)\b/i },
+  { reason: 'accessory_misc', regex: /\b(?:storage\s+bag|carrying\s+case|carry\s+case|protective\s+case|bag|tragetasche|transporttasche|schutztasche|hardcase|eva\s+material|materiale\s+eva|wasserdicht(?:e|er|es|en)?|waterproof|impermeabile|borsa(?:\s+trasporto)?|custodia|steam\s+code|code\s+steam|laptop)\b/i },
   { reason: 'accessory_part_number', regex: /\b(?:t\d{6,}|pla\d{5,}|pld\d{5,}|ga\d{5,}|cf\d{4,})\w*\b/i },
 ];
 const systemPatterns: Array<{ reason: string; regex: RegExp }> = [
