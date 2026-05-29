@@ -29,6 +29,10 @@ const envSchema = z.object({
   EBAY_MARKETPLACE_ID: z.string().default('EBAY_DE'),
   EBAY_SEARCH_PAGE_SIZE: positiveInteger.max(200).default(200),
   EBAY_MAX_PAGES_PER_BUCKET: positiveInteger.default(3),
+  EBAY_HTTP_TIMEOUT_MS: milliseconds.default(30_000),
+  EBAY_HTTP_MAX_RETRIES: z.coerce.number().int().min(0).max(10).default(3),
+  EBAY_HTTP_RETRY_DELAY_MS: milliseconds.min(0).max(60_000).default(1_000),
+  SCANNER_BUCKET_WATERMARK_OVERLAP_MINUTES: positiveInteger.default(10),
   NOTIFIER_PROVIDER: z.enum(['console', 'discord']).default('console'),
   DISCORD_BOT_TOKEN: optionalString,
   DISCORD_CHANNEL_ID: optionalString,
@@ -83,6 +87,10 @@ interface AppEnv {
   EBAY_MARKETPLACE_ID: string;
   EBAY_SEARCH_PAGE_SIZE: number;
   EBAY_MAX_PAGES_PER_BUCKET: number;
+  EBAY_HTTP_TIMEOUT_MS: number;
+  EBAY_HTTP_MAX_RETRIES: number;
+  EBAY_HTTP_RETRY_DELAY_MS: number;
+  SCANNER_BUCKET_WATERMARK_OVERLAP_MINUTES: number;
   NOTIFIER_PROVIDER: 'console' | 'discord';
   DISCORD_BOT_TOKEN: string;
   DISCORD_CHANNEL_ID: string;

@@ -216,6 +216,7 @@ export class ScannerService {
       const evaluationMode = options.evaluationMode ?? 'normal';
       const persistState = options.persistState ?? true;
       const runAvailabilityCleanup = options.runAvailabilityCleanup ?? true;
+      if (persistState) this.state.beginBatch();
       const activeGpuListingIds = options.ignoreSeen
         ? null
         : await this.loadActiveGpuListingIds();
@@ -224,11 +225,16 @@ export class ScannerService {
         const previousWatermark = options.ignoreBucketWatermarks
           ? undefined
           : this.bucketWatermarks.get(bucket.id);
-        const nextWatermark = new Date().toISOString();
+        const overlapMs = env.SCANNER_BUCKET_WATERMARK_OVERLAP_MINUTES * 60_000;
+        const cutoff = previousWatermark
+          ? new Date(new Date(previousWatermark).getTime() - overlapMs).toISOString()
+          : undefined;
+        let maxSeenItemOriginDate: string | undefined;
         logger.info({
           bucket: bucket.name,
           query: bucket.query,
           previousWatermark,
+          cutoff,
           ignoreSeen: options.ignoreSeen ?? false,
           ignoreBucketWatermarks: options.ignoreBucketWatermarks ?? false,
         }, 'Scanning bucket');
@@ -251,9 +257,13 @@ export class ScannerService {
                 await yieldToEventLoop();
               }
 
-              if (!isNewerThanCutoff(listing, previousWatermark)) {
+              if (!isNewerThanCutoff(listing, cutoff)) {
                 reachedKnownWindow = true;
                 break;
+              }
+
+              if (listing.itemOriginDate && (!maxSeenItemOriginDate || listing.itemOriginDate > maxSeenItemOriginDate)) {
+                maxSeenItemOriginDate = listing.itemOriginDate;
               }
 
               if (!collectedListings.has(listing.id)) {
@@ -269,12 +279,14 @@ export class ScannerService {
             offset += page.limit;
           }
 
-          this.bucketWatermarks.set(bucket.id, nextWatermark);
+          const newWatermark = maxSeenItemOriginDate ?? new Date().toISOString();
+          this.bucketWatermarks.set(bucket.id, newWatermark);
           logger.info({
             bucket: bucket.name,
             pageCount,
             bucketAddedCount,
             totalUniqueListings: collectedListings.size,
+            newWatermark,
           }, 'Finished bucket scan');
         } catch (error) {
           logger.error({ error, bucket: bucket.name }, 'failed to scan bucket');
@@ -358,6 +370,7 @@ export class ScannerService {
     try {
       return await runPromise;
     } finally {
+      await this.state.commitBatch();
       this.currentRunPromise = null;
       this.isRunning = false;
     }

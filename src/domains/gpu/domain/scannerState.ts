@@ -213,6 +213,8 @@ export class ScannerStateStore {
   private observations: ObservationRecord[] = [];
   private metadata: ScannerStateMetadata = {};
   private loadPromise: Promise<void> | null = null;
+  private batchActive = false;
+  private batchDirty = false;
 
   async load(): Promise<void> {
     if (!this.loadPromise) {
@@ -276,7 +278,7 @@ export class ScannerStateStore {
     this.prune(sentAt);
 
     try {
-      await this.persist();
+      await this.persistOrDefer();
     } catch (error) {
       logger.warn({ error, listingId: result.listing.id }, 'Failed to persist scanner state');
     }
@@ -291,7 +293,7 @@ export class ScannerStateStore {
     this.prune(observedAt);
 
     try {
-      await this.persist();
+      await this.persistOrDefer();
     } catch (error) {
       logger.warn({ error, listingId: result.listing.id }, 'Failed to persist scanner observation');
     }
@@ -317,7 +319,7 @@ export class ScannerStateStore {
     });
 
     try {
-      await this.persist();
+      await this.persistOrDefer();
     } catch (error) {
       logger.warn({ error, listingId }, 'Failed to persist scanner availability check');
     }
@@ -334,7 +336,7 @@ export class ScannerStateStore {
     this.metadata = {};
 
     try {
-      await this.persist();
+      await this.persistOrDefer();
     } catch (error) {
       logger.warn({ error }, 'Failed to persist scanner state reset');
     }
@@ -348,7 +350,7 @@ export class ScannerStateStore {
     }
 
     try {
-      await this.persist();
+      await this.persistOrDefer();
     } catch (error) {
       logger.warn({ error, listingId }, 'Failed to persist scanner seen removal');
     }
@@ -369,7 +371,7 @@ export class ScannerStateStore {
     });
 
     try {
-      await this.persist();
+      await this.persistOrDefer();
     } catch (error) {
       logger.warn({ error, listingId }, 'Failed to persist scanner availability failure');
     }
@@ -396,7 +398,7 @@ export class ScannerStateStore {
     }
 
     try {
-      await this.persist();
+      await this.persistOrDefer();
     } catch (error) {
       logger.warn({ error, cadence }, 'Failed to persist scanner digest timestamp');
     }
@@ -605,15 +607,42 @@ export class ScannerStateStore {
     };
   }
 
+  beginBatch(): void {
+    this.batchActive = true;
+    this.batchDirty = false;
+  }
+
+  async commitBatch(): Promise<void> {
+    this.batchActive = false;
+    if (this.batchDirty) {
+      try {
+        await this.persist();
+      } catch (error) {
+        logger.warn({ error }, 'Failed to persist batch state');
+      }
+      this.batchDirty = false;
+    }
+  }
+
+  private async persistOrDefer(): Promise<void> {
+    if (this.batchActive) {
+      this.batchDirty = true;
+    } else {
+      await this.persist();
+    }
+  }
+
   private async persist(): Promise<void> {
     const statePath = getStatePath();
+    const tmpPath = `${statePath}.tmp`;
     await fs.mkdir(path.dirname(statePath), { recursive: true });
-    await fs.writeFile(statePath, JSON.stringify({
+    await fs.writeFile(tmpPath, JSON.stringify({
       version: 3,
       updatedAt: new Date().toISOString(),
       metadata: this.metadata,
       seen: Array.from(this.seen.values()).sort((left, right) => left.sentAt.localeCompare(right.sentAt)),
       observations: this.observations.sort((left, right) => left.observedAt.localeCompare(right.observedAt)),
     } satisfies ScannerStateFile, null, 2));
+    await fs.rename(tmpPath, statePath);
   }
 }

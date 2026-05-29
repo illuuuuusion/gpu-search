@@ -134,3 +134,57 @@ test('evaluateListing rejects GPU carrying cases as accessories', () => {
   assert.equal(result.accepted, false);
   assert.match(result.reasons.join(' '), /accessory_misc/);
 });
+
+test('evaluateListing rejects listing when negative alias appears in title', () => {
+  const listing = buildListing({
+    title: 'RTX 3090 Ti Gaming OC gebraucht',
+    priceEur: 500,
+    shippingEur: 6.99,
+    totalEur: 506.99,
+  });
+
+  const result = evaluateListing(workingProfile, listing);
+  assert.equal(result.accepted, false);
+  assert.match(result.reasons.join(' '), /negative_alias=3090 Ti/);
+});
+
+test('evaluateListing rejects listing when negative alias appears only in subtitle', () => {
+  const listing = buildListing({
+    title: 'RTX 3090 Gaming OC gebraucht',
+    subtitle: 'Tatsaechlich eine 3090 Ti',
+    priceEur: 430,
+    shippingEur: 6.99,
+    totalEur: 436.99,
+  });
+
+  const result = evaluateListing(workingProfile, listing);
+  assert.equal(result.accepted, false);
+  assert.match(result.reasons.join(' '), /negative_alias=3090 Ti/);
+});
+
+test('evaluateListing rejects listing when negative alias appears only in description', () => {
+  const listing = buildListing({
+    title: 'RTX 3090 Gaming OC gebraucht',
+    description: 'Achtung: es handelt sich um eine 3090 Ti mit Fehlerbild.',
+    priceEur: 430,
+    shippingEur: 6.99,
+    totalEur: 436.99,
+  });
+
+  const result = evaluateListing(workingProfile, listing);
+  assert.equal(result.accepted, false);
+  assert.match(result.reasons.join(' '), /negative_alias=3090 Ti/);
+});
+
+test('evaluateListing does not reject listing whose title contains a word that is a substring of the negative alias', () => {
+  const listing = buildListing({
+    title: 'RTX 3090 gebraucht getestet',
+    priceEur: 350,
+    shippingEur: 5,
+    totalEur: 355,
+  });
+
+  // workingProfile has negativeAliases: ['3090 Ti'] — "3090" alone must not trigger
+  const result = evaluateListing(workingProfile, listing);
+  assert.equal(result.accepted, true);
+});

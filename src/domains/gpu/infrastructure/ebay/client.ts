@@ -1,5 +1,6 @@
-import axios from 'axios';
-import { env, getEbayApiBaseUrl } from '../../../../app/env/index.js';
+import { isAxiosError } from 'axios';
+import { env } from '../../../../app/env/index.js';
+import { ebayHttpClient, withRetry } from './http.js';
 import type { EbayListing, EbaySearchPage, GpuProfile } from '../../domain/models.js';
 import type { SearchBucket } from '../../config/searchBuckets.js';
 import { searchMockBucketListingsPage } from './mock.js';
@@ -227,12 +228,14 @@ export async function checkListingAvailability(itemId: string): Promise<ListingA
   const token = await getEbayAccessToken();
 
   try {
-    const response = await axios.get<EbayItemResponse>(`${getEbayApiBaseUrl()}/buy/browse/v1/item/${encodeURIComponent(itemId)}`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'X-EBAY-C-MARKETPLACE-ID': env.EBAY_MARKETPLACE_ID,
-      },
-    });
+    const response = await withRetry(() =>
+      ebayHttpClient.get<EbayItemResponse>(`/buy/browse/v1/item/${encodeURIComponent(itemId)}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'X-EBAY-C-MARKETPLACE-ID': env.EBAY_MARKETPLACE_ID,
+        },
+      }),
+    );
 
     const itemEndDate = response.data.itemEndDate;
     if (itemEndDate && new Date(itemEndDate).getTime() <= Date.now()) {
@@ -258,7 +261,7 @@ export async function checkListingAvailability(itemId: string): Promise<ListingA
       reason: availabilityStatuses[0]?.toLowerCase() ?? 'available',
     };
   } catch (error) {
-    if (axios.isAxiosError(error) && [404, 410].includes(error.response?.status ?? 0)) {
+    if (isAxiosError(error) && [404, 410].includes(error.response?.status ?? 0)) {
       return {
         available: false,
         checkedAt,
@@ -281,19 +284,21 @@ export async function searchBucketListingsPage(
 
   const token = await getEbayAccessToken();
 
-  const response = await axios.get<EbaySearchResponse>(`${getEbayApiBaseUrl()}/buy/browse/v1/item_summary/search`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'X-EBAY-C-MARKETPLACE-ID': env.EBAY_MARKETPLACE_ID,
-    },
-    params: {
-      q: bucket.query,
-      limit: env.EBAY_SEARCH_PAGE_SIZE,
-      offset,
-      filter: buildFilter(),
-      sort: 'newlyListed',
-    },
-  });
+  const response = await withRetry(() =>
+    ebayHttpClient.get<EbaySearchResponse>('/buy/browse/v1/item_summary/search', {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'X-EBAY-C-MARKETPLACE-ID': env.EBAY_MARKETPLACE_ID,
+      },
+      params: {
+        q: bucket.query,
+        limit: env.EBAY_SEARCH_PAGE_SIZE,
+        offset,
+        filter: buildFilter(),
+        sort: 'newlyListed',
+      },
+    }),
+  );
 
   return {
     listings: (response.data.itemSummaries ?? []).map(mapListing),

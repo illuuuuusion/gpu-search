@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
 import { ScannerStateStore } from './scannerState.js';
 import type { EvaluatedListing, GpuProfile } from '../domain/models.js';
 
@@ -110,4 +111,51 @@ test('availability tracking updates active listing status for web-ready snapshot
   assert.equal(snapshot.activeListings[0]?.lastAvailabilityState, 'check_failed');
   assert.equal(snapshot.activeListings[0]?.availabilityCheckFailures, 1);
   assert.equal(snapshot.activeListings[0]?.lastAvailabilityReason, 'temporary_error');
+});
+
+async function readStatePath(): Promise<string | null> {
+  const statePath = process.env['SCANNER_STATE_PATH'];
+  if (!statePath) return null;
+  try {
+    return await fs.readFile(statePath, 'utf-8');
+  } catch {
+    return null;
+  }
+}
+
+test('batch mode defers disk writes until commitBatch', async () => {
+  const store = new ScannerStateStore();
+  await store.load();
+  await store.reset();
+
+  const afterReset = await readStatePath();
+  assert.ok(afterReset, 'state file should exist after reset');
+
+  store.beginBatch();
+
+  await store.recordObservation(buildResult({ listing: { ...buildResult({}).listing, id: 'batch-listing-1' } }));
+  await store.recordObservation(buildResult({ listing: { ...buildResult({}).listing, id: 'batch-listing-2' } }));
+
+  const duringBatch = await readStatePath();
+  assert.equal(duringBatch, afterReset, 'file should not be updated during active batch');
+
+  await store.commitBatch();
+
+  const afterCommit = await readStatePath();
+  assert.notEqual(afterCommit, afterReset, 'file should be updated after commitBatch');
+  assert.ok(afterCommit?.includes('batch-listing-1'), 'committed state should contain first listing');
+  assert.ok(afterCommit?.includes('batch-listing-2'), 'committed state should contain second listing');
+});
+
+test('commitBatch without beginBatch is a no-op', async () => {
+  const store = new ScannerStateStore();
+  await store.load();
+  await store.reset();
+
+  const afterReset = await readStatePath();
+
+  await store.commitBatch();
+
+  const afterCommit = await readStatePath();
+  assert.equal(afterCommit, afterReset, 'file should be unchanged when commitBatch called without beginBatch');
 });

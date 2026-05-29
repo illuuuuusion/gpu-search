@@ -2,7 +2,8 @@ import { defectTerms, exclusionTerms } from '../config/exclusionTerms.js';
 import { env } from '../../../app/env/index.js';
 import type { EbayListing, EvaluatedListing, GpuProfile, ListingHealth, OfferType } from '../domain/models.js';
 import { assessRepairability } from './repairabilityScore.js';
-import { buildListingSearchText, getListingTextSources } from './listingSignals.js';
+import { buildListingSearchText, compactComparableText, getListingTextSources, normalizeListingText } from './listingSignals.js';
+import { listingMatchesAlias } from './aliasMatcher.js';
 
 const allowedCountries = new Set(env.ALLOW_COUNTRIES.split(',').map(v => v.trim().toUpperCase()));
 const accessoryPatterns: Array<{ reason: string; regex: RegExp }> = [
@@ -208,10 +209,12 @@ export function evaluateListing(
 ): EvaluatedListing {
   const evaluationMode = options.evaluationMode ?? 'normal';
   const reasons: string[] = [];
-  const title = listing.title.toLowerCase();
+  const searchText = buildListingSearchText(listing);
+  const searchNormalized = normalizeListingText(searchText);
+  const searchCompact = compactComparableText(searchText);
 
   for (const negative of profile.negativeAliases) {
-    if (title.includes(negative.toLowerCase())) {
+    if (listingMatchesAlias(searchNormalized, searchCompact, negative)) {
       reasons.push(`negative_alias=${negative}`);
       return rejectedResult(profile, listing, 'EXCLUDED', reasons);
     }

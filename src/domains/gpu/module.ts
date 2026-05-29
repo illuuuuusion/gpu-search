@@ -49,7 +49,7 @@ export class GpuModule {
   stop(): void {
     this.scheduler?.stop();
     if (this.availabilityRefreshTimer) {
-      clearInterval(this.availabilityRefreshTimer);
+      clearTimeout(this.availabilityRefreshTimer);
       this.availabilityRefreshTimer = null;
     }
   }
@@ -80,22 +80,29 @@ export class GpuModule {
     }
 
     if (this.availabilityRefreshTimer) {
-      clearInterval(this.availabilityRefreshTimer);
+      clearTimeout(this.availabilityRefreshTimer);
     }
 
     const intervalMs = Math.max(1, env.SCANNER_AVAILABILITY_RECHECK_MINUTES) * 60 * 1000;
-    this.availabilityRefreshTimer = setInterval(() => {
-      void this.getScanner().refreshAvailability()
-        .then(summary => {
-          if (summary.checkedListings > 0 || summary.removedListings > 0 || summary.failedChecks > 0) {
-            return this.getScanner().exportMarketDashboard(this.profiles);
-          }
 
-          return undefined;
-        })
-        .catch(error => {
-          logger.warn({ error }, 'availability refresh loop failed');
-        });
-    }, intervalMs);
+    const runAndReschedule = async () => {
+      const start = Date.now();
+      try {
+        const summary = await this.getScanner().refreshAvailability();
+        const durationMs = Date.now() - start;
+        if (summary.checkedListings > 0 || summary.removedListings > 0 || summary.failedChecks > 0) {
+          logger.info({ durationMs, ...summary }, 'availability refresh completed');
+          await this.getScanner().exportMarketDashboard(this.profiles).catch(err =>
+            logger.warn({ err }, 'Failed to export market dashboard after availability refresh'),
+          );
+        }
+      } catch (error) {
+        logger.warn({ error }, 'availability refresh loop failed');
+      } finally {
+        this.availabilityRefreshTimer = setTimeout(runAndReschedule, intervalMs);
+      }
+    };
+
+    this.availabilityRefreshTimer = setTimeout(runAndReschedule, intervalMs);
   }
 }
