@@ -455,6 +455,14 @@ function formatCompBuilderEmbed(snapshot: CompBuilderSnapshot): EmbedBuilder {
     });
   }
 
+  if (snapshot.autoCompleted) {
+    embed.addFields({
+      name: 'Auto-Vervollständigt',
+      value: 'Nur noch eine passende Full-Comp übrig — restliche Agenten wurden automatisch ergänzt.',
+      inline: false,
+    });
+  }
+
   return embed;
 }
 
@@ -534,7 +542,7 @@ function buildCompBuilderComponents(
     rows.push(agentRow);
   }
 
-  if (snapshot.selectedMapKey) {
+  if (snapshot.selectedMapKey && !snapshot.completed) {
     const utilityOptions: Array<{ label: string; value: string; description: string }> = [];
 
     utilityOptions.push(...snapshot.selectedAgentKeys.slice(0, 5).map(agentKey => ({

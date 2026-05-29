@@ -252,6 +252,7 @@ export interface CompBuilderSnapshot {
   exactComposition?: CompBuilderRecommendedComposition;
   savedPresets: CompBuilderPresetSummary[];
   replacementAgentKey?: string;
+  autoCompleted?: boolean;
   completed: boolean;
 }
 

@@ -160,9 +160,31 @@ export class CompBuilderService {
     return buildFilteredAggregates(state, session.filters, new Date());
   }
 
+  private autoCompleteIfUniqueComposition(session: CompBuilderSession, state: ValorantAppState): boolean {
+    if (!session.selectedMapKey) return false;
+    if (session.selectedAgentKeys.length >= 5) return false;
+    if (session.replacementAgentKey) return false;
+
+    const filteredAggregates = this.getFilteredAggregates(state, session);
+    const candidateAggregates = applySessionFilters(filteredAggregates, session);
+    const rankingAggregates = candidateAggregates.some(a => a.games >= MIN_RECOMMENDED_SAMPLE_GAMES)
+      ? candidateAggregates.filter(a => a.games >= MIN_RECOMMENDED_SAMPLE_GAMES)
+      : candidateAggregates;
+
+    if (rankingAggregates.length !== 1) return false;
+
+    const comp = rankingAggregates[0];
+    const missingAgents = comp.agentKeys.filter(k => !session.selectedAgentKeys.includes(k));
+    session.selectedAgentKeys = sortAgentKeysForDisplay([...session.selectedAgentKeys, ...missingAgents]);
+    session.selectedRole = undefined;
+    session.replacementAgentKey = undefined;
+    return true;
+  }
+
   private buildSnapshotFromSession(
     session: CompBuilderSession,
     state: ValorantAppState,
+    autoCompleted = false,
   ): CompBuilderSnapshot {
     const filteredAggregates = this.getFilteredAggregates(state, session);
     const availableMaps = [...new Map(
@@ -301,6 +323,7 @@ export class CompBuilderService {
       exactComposition: exactAggregate ? createRecommendedComposition(exactAggregate, state) : undefined,
       savedPresets: buildPresetSummary(state, session.userId),
       replacementAgentKey: session.replacementAgentKey,
+      autoCompleted: autoCompleted || undefined,
       completed,
     };
   }
@@ -440,6 +463,10 @@ export class CompBuilderService {
 
     this.touchSession(session);
     const state = await this.insights.getState();
-    return this.buildSnapshotFromSession(session, state);
+    const autoCompleteTriggers = new Set<CompBuilderAction['type']>(['set_map', 'load_preset', 'pick_agent', 'exclude_agent', 'include_agent']);
+    const autoCompleted = autoCompleteTriggers.has(action.type)
+      ? this.autoCompleteIfUniqueComposition(session, state)
+      : false;
+    return this.buildSnapshotFromSession(session, state, autoCompleted);
   }
 }

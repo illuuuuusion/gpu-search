@@ -330,6 +330,13 @@ function formatCompBuilderEmbed(snapshot) {
             ].filter((line) => Boolean(line)).join('\n'),
         });
     }
+    if (snapshot.autoCompleted) {
+        embed.addFields({
+            name: 'Auto-Vervollständigt',
+            value: 'Nur noch eine passende Full-Comp übrig — restliche Agenten wurden automatisch ergänzt.',
+            inline: false,
+        });
+    }
     return embed;
 }
 function buildCompBuilderComponents(snapshot) {
@@ -387,7 +394,7 @@ function buildCompBuilderComponents(snapshot) {
         }))));
         rows.push(agentRow);
     }
-    if (snapshot.selectedMapKey) {
+    if (snapshot.selectedMapKey && !snapshot.completed) {
         const utilityOptions = [];
         utilityOptions.push(...snapshot.selectedAgentKeys.slice(0, 5).map(agentKey => ({
             label: `Ersetze ${snapshot.selectedAgentDisplayNames[snapshot.selectedAgentKeys.indexOf(agentKey)] ?? agentKey}`,
