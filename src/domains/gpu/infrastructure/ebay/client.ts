@@ -17,6 +17,9 @@ interface EbaySearchResponse {
 interface EbayItemResponse {
   itemId?: string;
   itemEndDate?: string;
+  price?: Record<string, unknown>;
+  currentBidPrice?: Record<string, unknown>;
+  bidCount?: number;
   estimatedAvailabilities?: Array<Record<string, unknown>>;
 }
 
@@ -24,6 +27,8 @@ export interface ListingAvailability {
   available: boolean;
   checkedAt: string;
   reason: string;
+  currentPriceEur?: number; // D: frischer Preis-/Gebotsstand fuer Reminder
+  currentBidCount?: number;
 }
 
 function toNumber(value: unknown): number {
@@ -222,6 +227,7 @@ export async function checkListingAvailability(itemId: string): Promise<ListingA
       available: !unavailable,
       checkedAt,
       reason: unavailable ? 'mock_unavailable' : 'mock_available',
+      currentPriceEur: unavailable ? undefined : 123.45,
     };
   }
 
@@ -255,10 +261,15 @@ export async function checkListingAvailability(itemId: string): Promise<ListingA
       };
     }
 
+    const currentPriceEur = toNumber(
+      (response.data.currentBidPrice ?? response.data.price)?.value,
+    ) || undefined;
     return {
       available: true,
       checkedAt,
       reason: availabilityStatuses[0]?.toLowerCase() ?? 'available',
+      currentPriceEur,
+      currentBidCount: typeof response.data.bidCount === 'number' ? response.data.bidCount : undefined,
     };
   } catch (error) {
     if (isAxiosError(error) && [404, 410].includes(error.response?.status ?? 0)) {

@@ -1,15 +1,21 @@
 import { setImmediate as yieldToEventLoop } from 'node:timers/promises';
 import { evaluateListing } from '../domain/filterEngine.js';
-import { formatListingMessage } from '../domain/messageFormatter.js';
+import { formatListingMessage, formatDreamDealMessage, formatArbitrageMessage } from '../domain/messageFormatter.js';
 import { selectProfileForListing } from '../domain/profileMatcher.js';
+import { calculateDreamDealScore } from '../domain/dreamDealScore.js';
+import { assessArbitrage } from '../domain/arbitrage.js';
+import { findAliasFallback, logAliasFallback } from '../domain/aliasFallback.js';
+import { runtimeExclusionStore, type RuntimeExclusion } from '../domain/runtimeExclusions.js';
+import { wouldBlockLegitimateAlias } from '../domain/aliasSimilarity.js';
 import { searchBuckets } from '../config/searchBuckets.js';
 import { checkListingAvailability, searchBucketListingsPage } from '../infrastructure/ebay/client.js';
+import { searchKleinanzeigenListings } from '../infrastructure/kleinanzeigen/client.js';
 import type { GpuProfile } from '../domain/models.js';
 import type { Notifier } from '../../../app/shared/notifier/index.js';
 import type { EbayListing } from '../domain/models.js';
 import { logger } from '../../../app/shared/logger.js';
 import { env } from '../../../app/env/index.js';
-import { ScannerStateStore, type ScannerStateResetResult, type AcceptanceAdjustment } from '../domain/scannerState.js';
+import { ScannerStateStore, type ScannerStateResetResult, type AcceptanceAdjustment, type DreamDealAdjustment, type ReminderScheduleResult } from '../domain/scannerState.js';
 import type { MarketDashboardSnapshot, MarketDigestMessage } from '../domain/models.js';
 import type { ReactionRoute } from '../../../app/shared/botBindings.js';
 
@@ -55,7 +61,10 @@ export class ScannerService {
 
   private async ensureInitialized(): Promise<void> {
     if (!this.initializationPromise) {
-      this.initializationPromise = this.state.load();
+      this.initializationPromise = Promise.all([
+        this.state.load(),
+        runtimeExclusionStore.load(),
+      ]).then(() => undefined);
     }
 
     await this.initializationPromise;
@@ -178,6 +187,155 @@ export class ScannerService {
   async resetAcceptanceBias(profileName: string): Promise<AcceptanceAdjustment> {
     await this.ensureInitialized();
     return this.state.resetAcceptanceBias(profileName);
+  }
+
+  // C1
+  async applyDreamDealReaction(profileName: string, direction: 'up' | 'down'): Promise<DreamDealAdjustment> {
+    await this.ensureInitialized();
+    return this.state.recordDreamDealReaction(profileName, direction);
+  }
+
+  async resetDreamDealBias(profileName: string): Promise<DreamDealAdjustment> {
+    await this.ensureInitialized();
+    return this.state.resetDreamDealBias(profileName);
+  }
+
+  // D
+  async scheduleAuctionReminder(input: {
+    listingId: string;
+    channelId: string;
+    messageId: string;
+    userId: string;
+  }): Promise<ReminderScheduleResult> {
+    await this.ensureInitialized();
+    return this.state.scheduleAuctionReminder({ ...input, leadMinutes: env.AUCTION_REMINDER_LEAD_MINUTES });
+  }
+
+  // C2
+  async reportExclusion(input: {
+    profileName: string;
+    term: string;
+    reportedByUserId: string;
+    originalListingId: string;
+    originalListingTitle: string;
+  }): Promise<{ status: 'created' | 'blocked'; blockedBy?: { profileName: string; alias: string }; term: string }> {
+    await this.ensureInitialized();
+    const trimmed = input.term.trim();
+    if (!trimmed) {
+      return { status: 'blocked', term: trimmed };
+    }
+    // Permissive Kalibrierung: nur echte Alias-Kollisionen ablehnen.
+    const collision = wouldBlockLegitimateAlias(trimmed, this.profilesRef, env.EXCLUSION_SIMILARITY_MAX_DISTANCE);
+    if (collision) {
+      return { status: 'blocked', blockedBy: collision, term: trimmed };
+    }
+    await runtimeExclusionStore.add({
+      profileName: input.profileName,
+      term: trimmed,
+      reportedByUserId: input.reportedByUserId,
+      originalListingId: input.originalListingId,
+      originalListingTitle: input.originalListingTitle,
+    });
+    return { status: 'created', term: trimmed };
+  }
+
+  private profilesRef: GpuProfile[] = [];
+
+  setProfiles(profiles: GpuProfile[]): void {
+    this.profilesRef = profiles;
+  }
+
+  async reviewExclusions(days = 30): Promise<RuntimeExclusion[]> {
+    await this.ensureInitialized();
+    return runtimeExclusionStore.listActive(days);
+  }
+
+  async undoExclusion(id: string): Promise<boolean> {
+    await this.ensureInitialized();
+    return runtimeExclusionStore.revert(id);
+  }
+
+  // Reminder-Tick: alle faelligen Reminder abarbeiten, jeweils isoliert (A5).
+  async processDueAuctionReminders(): Promise<{ fired: number; cancelled: number; failed: number }> {
+    await this.ensureInitialized();
+    const due = this.state.getAuctionRemindersDue();
+    let fired = 0;
+    let cancelled = 0;
+    let failed = 0;
+
+    for (const reminder of due) {
+      try {
+        const availability = await checkListingAvailability(reminder.listingId.replace(/^kleinanzeigen-/, ''));
+        if (!availability.available) {
+          if (this.notifier.sendReminderCancellation) {
+            await this.notifier.sendReminderCancellation(reminder);
+          }
+          await this.state.markAuctionReminder(reminder.listingId, 'cancelled');
+          cancelled += 1;
+          continue;
+        }
+
+        if (this.notifier.sendAuctionReminder) {
+          await this.notifier.sendAuctionReminder({
+            ...reminder,
+            currentPriceEur: availability.currentPriceEur,
+            currentBidCount: availability.currentBidCount,
+          });
+        }
+        await this.state.markAuctionReminder(reminder.listingId, 'fired');
+        fired += 1;
+      } catch (error) {
+        // Ein fehlgeschlagener Reminder darf die anderen im Batch nicht blocken.
+        logger.warn({ error, listingId: reminder.listingId }, 'auction reminder failed');
+        failed += 1;
+      }
+    }
+
+    return { fired, cancelled, failed };
+  }
+
+  private async runArbitrageScan(profiles: GpuProfile[]): Promise<number> {
+    let posted = 0;
+    for (const profile of profiles) {
+      const resaleReferenceEur = this.state.getResaleReference(profile.name);
+      if (!resaleReferenceEur) {
+        continue; // ohne eigene Historie keine Wiederverkaufsreferenz
+      }
+
+      const query = profile.aliases[0] ?? profile.name;
+      const listings = await searchKleinanzeigenListings(query);
+      for (const listing of listings) {
+        if (this.state.hasSeen(listing.id)) {
+          continue;
+        }
+        const match = selectProfileForListing([profile], listing);
+        if (!match) {
+          continue;
+        }
+        const evaluated = evaluateListing(profile, listing);
+        if (evaluated.health === 'EXCLUDED') {
+          continue;
+        }
+        const assessment = assessArbitrage({
+          buyPriceEur: listing.priceEur,
+          buyShippingEur: listing.shippingEur,
+          resaleReferenceEur,
+        });
+        if (!assessment.profitable) {
+          continue;
+        }
+
+        try {
+          const receipt = (await this.notifier.send(formatArbitrageMessage(evaluated, assessment))) ?? undefined;
+          await this.state.recordSent(evaluated, receipt);
+          posted += 1;
+        } catch (error) {
+          logger.warn({ error, listingId: listing.id }, 'failed to send arbitrage alert');
+        }
+      }
+    }
+
+    return posted;
   }
 
   async resetState(profiles?: GpuProfile[]): Promise<ScannerStateResetResult> {
@@ -340,7 +498,16 @@ export class ScannerService {
         }
 
         const match = selectProfileForListing(profiles, listing);
-        if (!match) continue;
+        if (!match) {
+          // B6: regelbasiertes Alias-Fallback — Near-Miss nur loggen, kein Alarm.
+          if (env.ALIAS_FALLBACK_ENABLED) {
+            const fallback = findAliasFallback(listing, profiles);
+            if (fallback) {
+              void logAliasFallback(fallback);
+            }
+          }
+          continue;
+        }
 
         const acceptanceBias = env.ADAPTIVE_THRESHOLD_ENABLED
           ? this.state.getAcceptanceBias(match.profile.name)
@@ -364,9 +531,17 @@ export class ScannerService {
           continue;
         }
 
+        const listingHealth = result.health === 'DEFECT' ? 'DEFECT' : 'WORKING';
+        const dreamDealScore = env.DREAM_DEAL_ENABLED && listingHealth === 'WORKING'
+          ? calculateDreamDealScore(result)
+          : undefined;
         const resultWithStats = {
           ...result,
           marketStats: this.state.previewStats(result),
+          dealTiming: env.DEAL_TIMING_ENABLED
+            ? this.state.assessDealTiming(match.profile.name, listingHealth)
+            : undefined,
+          dreamDealScore,
         };
 
         if (persistState) {
@@ -379,6 +554,23 @@ export class ScannerService {
             await this.state.recordSent(resultWithStats, receipt);
           }
           alertsPosted += 1;
+
+          // C1: zusaetzliche Dream-Deal-Sondernachricht, wenn Score >= Profil-Schwelle.
+          if (
+            persistState
+            && dreamDealScore !== undefined
+            && this.notifier.sendDreamDealAlert
+            && dreamDealScore >= this.state.getDreamDealThreshold(match.profile.name)
+          ) {
+            try {
+              await this.notifier.sendDreamDealAlert(formatDreamDealMessage(resultWithStats), {
+                profileName: match.profile.name,
+                listingId: listing.id,
+              });
+            } catch (error) {
+              logger.warn({ error, listingId: listing.id }, 'failed to send dream deal alert');
+            }
+          }
         } catch (error) {
           notificationFailures += 1;
           logger.error({
@@ -387,6 +579,15 @@ export class ScannerService {
             profile: match.profile.name,
             matchedAlias: match.alias,
           }, 'failed to send notification');
+        }
+      }
+
+      // B4: Cross-Marketplace-Arbitrage-Durchlauf (nur wenn aktiviert; Default aus).
+      if (persistState && env.KLEINANZEIGEN_ENABLED) {
+        try {
+          alertsPosted += await this.runArbitrageScan(profiles);
+        } catch (error) {
+          logger.warn({ error }, 'arbitrage scan failed');
         }
       }
 

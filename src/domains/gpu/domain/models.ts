@@ -1,6 +1,20 @@
 export type OfferType = 'FIXED_PRICE' | 'AUCTION';
 export type ListingHealth = 'WORKING' | 'DEFECT' | 'EXCLUDED' | 'UNKNOWN';
 
+// B4: Marktplatz-Herkunft eines Listings. Default 'ebay' fuer Bestandscode.
+export type MarketplaceSource = 'ebay' | 'kleinanzeigen';
+
+// B2: einfache Kauf-jetzt-oder-warten-Einschaetzung aus eigener Historie.
+export type DealTimingVerdict = 'buy_now' | 'neutral' | 'wait';
+
+export interface DealTimingAssessment {
+  verdict: DealTimingVerdict;
+  recentAveragePriceEur: number;
+  olderAveragePriceEur: number;
+  changePercent: number; // >0 = Preise steigen, <0 = fallen
+  sampleCount: number;
+}
+
 export interface PriceLimits {
   buyNowWorking: number;
   buyNowDefect: number;
@@ -112,6 +126,22 @@ export interface MarketDigestMessage {
   topProfiles: MarketDigestTopProfile[];
 }
 
+// D: Payload fuer Reminder-Nachrichten (Notifier-Schicht, marktplatz-agnostisch).
+export interface AuctionReminderInfo {
+  listingId: string;
+  profileName: string;
+  channelId: string;
+  messageId: string;
+  itemEndDate: string;
+  remindAt: string;
+  requestedByUserId: string;
+}
+
+export interface AuctionReminderFired extends AuctionReminderInfo {
+  currentPriceEur?: number;
+  currentBidCount?: number;
+}
+
 export interface RepairabilityAssessment {
   score: number;
   confidence: 'low' | 'medium' | 'high';
@@ -120,6 +150,7 @@ export interface RepairabilityAssessment {
 
 export interface EbayListing {
   id: string;
+  source?: MarketplaceSource; // B4: fehlend = 'ebay'
   title: string;
   subtitle?: string;
   shortDescription?: string;
@@ -145,6 +176,10 @@ export interface EbayListing {
   raw: unknown;
 }
 
+// B4: generischer Marktplatz-Listing-Typ. Aktuell identisch zu EbayListing
+// (Type-Alias statt Rename an ~20 Call-Sites), unterscheidbar ueber `source`.
+export type MarketplaceListing = EbayListing;
+
 export interface EvaluatedListing {
   profile: GpuProfile;
   listing: EbayListing;
@@ -158,6 +193,8 @@ export interface EvaluatedListing {
   limitHeadroomPercent: number;
   repairability?: RepairabilityAssessment;
   marketStats?: ProfileMarketStats;
+  dreamDealScore?: number; // C1: nur fuer WORKING-Listings berechnet
+  dealTiming?: DealTimingAssessment; // B2
 }
 
 export interface EbaySearchPage {

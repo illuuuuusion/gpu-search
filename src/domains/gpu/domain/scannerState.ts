@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { env } from '../../../app/env/index.js';
 import type {
+  DealTimingAssessment,
   EvaluatedListing,
   GpuProfile,
   MarketBarDatum,
@@ -34,6 +35,7 @@ interface SeenRecord {
   sentAt: string;
   notificationMessageId?: string;
   notificationChannelId?: string;
+  itemEndDate?: string; // D: Auktions-Endzeit fuer spaetere Reminder-Reaction
   lastAvailabilityCheckAt?: string;
   lastAvailabilityState?: 'available' | 'unavailable' | 'check_failed';
   lastAvailabilityReason?: string;
@@ -76,18 +78,58 @@ interface ReactionRouteRecord {
   createdAt: string;
 }
 
+// C1: separater Threshold-Bias je Profil fuer den Dream-Deal-Score, plus Audit-Log.
+interface DreamDealBiasRecord {
+  profileName: string;
+  thresholdBias: number; // auf DREAM_DEAL_MIN_SCORE addiert, gebunden [-BOUND, BOUND]
+  recentReactions: { direction: 'up' | 'down'; at: string }[];
+  lastAdjustedAt?: string;
+  lastDecayAt?: string;
+  auditLog: { at: string; oldThreshold: number; newThreshold: number; reason: string }[];
+}
+
+// D: geplanter Auktions-Reminder (gemeinsam pro Listing, ueberlebt Neustarts).
+interface AuctionReminderRecord {
+  listingId: string;
+  profileName: string;
+  remindAt: string;
+  itemEndDate: string;
+  channelId: string;
+  messageId: string;
+  requestedByUserId: string;
+  status: 'pending' | 'fired' | 'cancelled';
+  createdAt: string;
+}
+
 const BIAS_STEP = 0.05;
 const BIAS_BOUND = 0.15;
 const REACTION_WINDOW = 5;
 const REACTION_THRESHOLD = 3;
 const BIAS_DECAY_PER_DAY = 0.98;
 const BIAS_ZERO_EPSILON = 0.005;
+const DREAM_DEAL_BIAS_STEP = 3;
+const DREAM_DEAL_BIAS_BOUND = 10;
+const DREAM_DEAL_ZERO_EPSILON = 0.05;
+const AUDIT_LOG_MAX = 50;
 
 export interface AcceptanceAdjustment {
   adjusted: boolean;
   profileName: string;
   previousBias: number;
   bias: number;
+}
+
+export interface DreamDealAdjustment {
+  adjusted: boolean;
+  profileName: string;
+  previousThreshold: number;
+  threshold: number;
+}
+
+export interface ReminderScheduleResult {
+  scheduled: boolean;
+  reason?: 'no_end_date' | 'already_ended' | 'already_scheduled';
+  remindAt?: string;
 }
 
 function clampBias(value: number): number {
@@ -99,13 +141,45 @@ function roundBias(value: number): number {
   return Number(value.toFixed(4));
 }
 
+interface FeedbackWindowState {
+  value: number;
+  recentReactions: { direction: 'up' | 'down'; at: string }[];
+  lastAdjustedAt?: string;
+  lastDecayAt?: string;
+}
+
+// Gemeinsame Anti-Overreaction-Logik fuer B5 (acceptanceBias) und C1 (dreamDealBias):
+// Reaction ins rollierende Fenster; bei REACTION_THRESHOLD von REACTION_WINDOW
+// gleichgerichtet einen Schritt anwenden (geclampt) und das Fenster leeren.
+function applyBoundedFeedback(
+  state: FeedbackWindowState,
+  direction: 'up' | 'down',
+  step: number,
+  bound: number,
+  now: string,
+): number {
+  state.recentReactions = [...state.recentReactions, { direction, at: now }].slice(-REACTION_WINDOW);
+  const previousValue = state.value;
+  const sameDirection = state.recentReactions.filter(entry => entry.direction === direction).length;
+  if (sameDirection >= REACTION_THRESHOLD) {
+    const next = state.value + (direction === 'up' ? step : -step);
+    state.value = Math.max(-bound, Math.min(bound, Number(next.toFixed(4))));
+    state.lastAdjustedAt = now;
+    state.lastDecayAt = now;
+    state.recentReactions = [];
+  }
+  return previousValue;
+}
+
 interface ScannerStateFile {
-  version: 4;
+  version: 5;
   updatedAt: string;
   metadata?: ScannerStateMetadata;
   seen: SeenRecord[];
   observations: ObservationRecord[];
   profileBias?: ProfileBiasRecord[];
+  dreamDealBias?: DreamDealBiasRecord[];
+  auctionReminders?: AuctionReminderRecord[];
   reactionRoutes?: ReactionRouteRecord[];
 }
 
@@ -258,6 +332,8 @@ export class ScannerStateStore {
   private observations: ObservationRecord[] = [];
   private metadata: ScannerStateMetadata = {};
   private readonly profileBias = new Map<string, ProfileBiasRecord>();
+  private readonly dreamDealBias = new Map<string, DreamDealBiasRecord>();
+  private auctionReminders: AuctionReminderRecord[] = [];
   private readonly reactionRoutes = new Map<string, ReactionRouteRecord>();
   private loadPromise: Promise<void> | null = null;
   private batchActive = false;
@@ -313,6 +389,7 @@ export class ScannerStateStore {
       sentAt,
       notificationMessageId: receipt?.messageId,
       notificationChannelId: receipt?.channelId,
+      itemEndDate: result.listing.itemEndDate,
       lastAvailabilityCheckAt: sentAt,
       lastAvailabilityState: 'available',
       lastAvailabilityReason: 'sent',
@@ -323,11 +400,12 @@ export class ScannerStateStore {
       this.toObservation(result, sentAt),
     ];
     if (receipt?.messageId) {
-      // A7: Reaction-Route fuer 👍/👎-Feedback an diese Alert-Nachricht binden.
+      // A7: eine Route pro Alert-Nachricht; der 'gpu-alert'-Handler dispatcht dann
+      // per Emoji (👍/👎 B5, 🚫 C2, ⏰ D). Bewusst EIN Typ pro messageId.
       this.reactionRoutes.set(receipt.messageId, {
         messageId: receipt.messageId,
         channelId: receipt.channelId,
-        type: 'acceptance-feedback',
+        type: 'gpu-alert',
         profileName: result.profile.name,
         listingId: result.listing.id,
         createdAt: sentAt,
@@ -346,8 +424,55 @@ export class ScannerStateStore {
     return this.profileBias.get(profileName)?.acceptanceBias ?? 0;
   }
 
+  // B2: Kauf-jetzt-oder-warten aus eigener Beobachtungs-Historie (keine Sold-Comps).
+  // Vergleicht Ø-Preis der letzten 7 Tage gegen Tag 8-30 fuer Profil+Health.
+  // ponytail: Prozent-Differenz zweier Durchschnitte, kein Trend-Modell.
+  assessDealTiming(profileName: string, health: 'WORKING' | 'DEFECT', now = Date.now()): DealTimingAssessment | undefined {
+    const recentCutoff = now - 7 * 24 * 60 * 60 * 1000;
+    const olderCutoff = now - 30 * 24 * 60 * 60 * 1000;
+    const relevant = this.observations.filter(observation =>
+      observation.profileName === profileName && observation.health === health);
+    const recent = relevant.filter(observation => new Date(observation.observedAt).getTime() >= recentCutoff);
+    const older = relevant.filter(observation => {
+      const at = new Date(observation.observedAt).getTime();
+      return at < recentCutoff && at >= olderCutoff;
+    });
+
+    if (recent.length < 1 || older.length < 1 || recent.length + older.length < env.DEAL_TIMING_MIN_SAMPLES) {
+      return undefined;
+    }
+
+    const average = (items: ObservationRecord[]): number =>
+      items.reduce((sum, item) => sum + item.totalEur, 0) / items.length;
+    const recentAvg = average(recent);
+    const olderAvg = average(older);
+    const changePercent = olderAvg > 0 ? ((recentAvg - olderAvg) / olderAvg) * 100 : 0;
+    const verdict: DealTimingAssessment['verdict'] = changePercent >= 5
+      ? 'buy_now'
+      : changePercent <= -5
+        ? 'wait'
+        : 'neutral';
+
+    return {
+      verdict,
+      recentAveragePriceEur: round(recentAvg),
+      olderAveragePriceEur: round(olderAvg),
+      changePercent: round(changePercent),
+      sampleCount: recent.length + older.length,
+    };
+  }
+
   getReactionRoute(messageId: string): ReactionRouteRecord | undefined {
     return this.reactionRoutes.get(messageId);
+  }
+
+  // B4: Ø funktionierender eBay-Preis als Wiederverkaufsreferenz fuer die Marge.
+  getResaleReference(profileName: string): number | undefined {
+    const working = this.getWindowedObservations(profileName).filter(observation => observation.health === 'WORKING');
+    if (working.length === 0) {
+      return undefined;
+    }
+    return round(working.reduce((sum, observation) => sum + observation.totalEur, 0) / working.length);
   }
 
   async registerReactionRoute(record: Omit<ReactionRouteRecord, 'createdAt'>): Promise<void> {
@@ -365,16 +490,17 @@ export class ScannerStateStore {
     const now = new Date().toISOString();
     const record = this.profileBias.get(profileName)
       ?? { profileName, acceptanceBias: 0, recentReactions: [] };
-    record.recentReactions = [...record.recentReactions, { direction, at: now }].slice(-REACTION_WINDOW);
-    const previousBias = record.acceptanceBias;
-
-    const sameDirection = record.recentReactions.filter(entry => entry.direction === direction).length;
-    if (sameDirection >= REACTION_THRESHOLD) {
-      record.acceptanceBias = clampBias(roundBias(record.acceptanceBias + (direction === 'up' ? BIAS_STEP : -BIAS_STEP)));
-      record.lastAdjustedAt = now;
-      record.lastDecayAt = now;
-      record.recentReactions = []; // verhindert sofortiges erneutes Ausloesen
-    }
+    const state: FeedbackWindowState = {
+      value: record.acceptanceBias,
+      recentReactions: record.recentReactions,
+      lastAdjustedAt: record.lastAdjustedAt,
+      lastDecayAt: record.lastDecayAt,
+    };
+    const previousBias = applyBoundedFeedback(state, direction, BIAS_STEP, BIAS_BOUND, now);
+    record.acceptanceBias = clampBias(state.value);
+    record.recentReactions = state.recentReactions;
+    record.lastAdjustedAt = state.lastAdjustedAt;
+    record.lastDecayAt = state.lastDecayAt;
 
     this.profileBias.set(profileName, record);
     try {
@@ -384,6 +510,142 @@ export class ScannerStateStore {
     }
 
     return { adjusted: record.acceptanceBias !== previousBias, profileName, previousBias, bias: record.acceptanceBias };
+  }
+
+  // ---------------------------------------------------------------------------
+  // C1: Dream-Deal-Score-Threshold-Bias (eigenes Feld, eigenes Audit-Log).
+  // ---------------------------------------------------------------------------
+  getDreamDealThreshold(profileName: string): number {
+    const bias = this.dreamDealBias.get(profileName)?.thresholdBias ?? 0;
+    return Math.max(0, env.DREAM_DEAL_MIN_SCORE + bias);
+  }
+
+  async recordDreamDealReaction(profileName: string, direction: 'up' | 'down'): Promise<DreamDealAdjustment> {
+    const now = new Date().toISOString();
+    const record = this.dreamDealBias.get(profileName)
+      ?? { profileName, thresholdBias: 0, recentReactions: [], auditLog: [] };
+    const previousThreshold = Math.max(0, env.DREAM_DEAL_MIN_SCORE + record.thresholdBias);
+    const state: FeedbackWindowState = {
+      value: record.thresholdBias,
+      recentReactions: record.recentReactions,
+      lastAdjustedAt: record.lastAdjustedAt,
+      lastDecayAt: record.lastDecayAt,
+    };
+    applyBoundedFeedback(state, direction, DREAM_DEAL_BIAS_STEP, DREAM_DEAL_BIAS_BOUND, now);
+    record.thresholdBias = state.value;
+    record.recentReactions = state.recentReactions;
+    record.lastAdjustedAt = state.lastAdjustedAt;
+    record.lastDecayAt = state.lastDecayAt;
+    const newThreshold = Math.max(0, env.DREAM_DEAL_MIN_SCORE + record.thresholdBias);
+    const adjusted = newThreshold !== previousThreshold;
+    if (adjusted) {
+      record.auditLog = [
+        ...record.auditLog,
+        { at: now, oldThreshold: previousThreshold, newThreshold, reason: direction === 'up' ? 'cold_feedback' : 'fire_feedback' },
+      ].slice(-AUDIT_LOG_MAX);
+    }
+
+    this.dreamDealBias.set(profileName, record);
+    try {
+      await this.persistOrDefer();
+    } catch (error) {
+      logger.warn({ error, profileName }, 'Failed to persist dream deal reaction');
+    }
+
+    return { adjusted, profileName, previousThreshold, threshold: newThreshold };
+  }
+
+  async resetDreamDealBias(profileName: string): Promise<DreamDealAdjustment> {
+    const record = this.dreamDealBias.get(profileName);
+    const previousThreshold = Math.max(0, env.DREAM_DEAL_MIN_SCORE + (record?.thresholdBias ?? 0));
+    if (record) {
+      const now = new Date().toISOString();
+      const newThreshold = env.DREAM_DEAL_MIN_SCORE;
+      record.thresholdBias = 0;
+      record.recentReactions = [];
+      record.lastAdjustedAt = now;
+      record.lastDecayAt = now;
+      if (previousThreshold !== newThreshold) {
+        record.auditLog = [
+          ...record.auditLog,
+          { at: now, oldThreshold: previousThreshold, newThreshold, reason: 'reset' },
+        ].slice(-AUDIT_LOG_MAX);
+      }
+    }
+
+    try {
+      await this.persistOrDefer();
+    } catch (error) {
+      logger.warn({ error, profileName }, 'Failed to persist dream deal reset');
+    }
+
+    return { adjusted: previousThreshold !== env.DREAM_DEAL_MIN_SCORE, profileName, previousThreshold, threshold: env.DREAM_DEAL_MIN_SCORE };
+  }
+
+  // ---------------------------------------------------------------------------
+  // D: Auktions-Sniper-Reminder.
+  // ---------------------------------------------------------------------------
+  scheduleAuctionReminder(input: {
+    listingId: string;
+    channelId: string;
+    messageId: string;
+    userId: string;
+    leadMinutes: number;
+  }): ReminderScheduleResult {
+    const seen = this.seen.get(input.listingId);
+    if (!seen?.itemEndDate) {
+      return { scheduled: false, reason: 'no_end_date' };
+    }
+
+    const endMs = new Date(seen.itemEndDate).getTime();
+    if (!Number.isFinite(endMs) || endMs <= Date.now()) {
+      return { scheduled: false, reason: 'already_ended' };
+    }
+
+    const existing = this.auctionReminders.find(
+      reminder => reminder.listingId === input.listingId && reminder.status === 'pending',
+    );
+    if (existing) {
+      return { scheduled: false, reason: 'already_scheduled', remindAt: existing.remindAt };
+    }
+
+    // Reminder darf nicht in der Vergangenheit liegen (Auktion endet sehr bald).
+    const remindMs = Math.max(Date.now(), endMs - input.leadMinutes * 60_000);
+    const remindAt = new Date(remindMs).toISOString();
+    this.auctionReminders.push({
+      listingId: input.listingId,
+      profileName: seen.profileName,
+      remindAt,
+      itemEndDate: seen.itemEndDate,
+      channelId: input.channelId,
+      messageId: input.messageId,
+      requestedByUserId: input.userId,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+    });
+
+    void this.persistOrDefer().catch(error => logger.warn({ error, listingId: input.listingId }, 'Failed to persist auction reminder'));
+    return { scheduled: true, remindAt };
+  }
+
+  getAuctionRemindersDue(now = Date.now()): AuctionReminderRecord[] {
+    return this.auctionReminders.filter(
+      reminder => reminder.status === 'pending' && new Date(reminder.remindAt).getTime() <= now,
+    );
+  }
+
+  async markAuctionReminder(listingId: string, status: 'fired' | 'cancelled'): Promise<void> {
+    const reminder = this.auctionReminders.find(entry => entry.listingId === listingId && entry.status === 'pending');
+    if (!reminder) {
+      return;
+    }
+
+    reminder.status = status;
+    try {
+      await this.persistOrDefer();
+    } catch (error) {
+      logger.warn({ error, listingId }, 'Failed to persist auction reminder status');
+    }
   }
 
   async resetAcceptanceBias(profileName: string): Promise<AcceptanceAdjustment> {
@@ -431,6 +693,29 @@ export class ScannerStateStore {
       changed = true;
     }
 
+    // C1: Dream-Deal-Threshold-Bias mit demselben Multiplikator Richtung 0.
+    for (const record of this.dreamDealBias.values()) {
+      if (record.thresholdBias === 0) {
+        continue;
+      }
+
+      const last = record.lastDecayAt ?? record.lastAdjustedAt;
+      if (!last) {
+        record.lastDecayAt = new Date(now).toISOString();
+        continue;
+      }
+
+      const days = (now - new Date(last).getTime()) / (24 * 60 * 60 * 1000);
+      if (days <= 0) {
+        continue;
+      }
+
+      const decayed = roundBias(record.thresholdBias * BIAS_DECAY_PER_DAY ** days);
+      record.thresholdBias = Math.abs(decayed) < DREAM_DEAL_ZERO_EPSILON ? 0 : decayed;
+      record.lastDecayAt = new Date(now).toISOString();
+      changed = true;
+    }
+
     if (changed) {
       try {
         await this.persistOrDefer();
@@ -440,8 +725,7 @@ export class ScannerStateStore {
     }
   }
 
-  async recordObservation(result: EvaluatedListing): Promise<void> {
-    const observedAt = new Date().toISOString();
+  async recordObservation(result: EvaluatedListing, observedAt = new Date().toISOString()): Promise<void> {
     this.observations = [
       ...this.observations.filter(observation => observation.listingId !== result.listing.id),
       this.toObservation(result, observedAt),
@@ -491,6 +775,8 @@ export class ScannerStateStore {
     this.observations = [];
     this.metadata = {};
     this.profileBias.clear();
+    this.dreamDealBias.clear();
+    this.auctionReminders = [];
     this.reactionRoutes.clear();
 
     try {
@@ -732,6 +1018,21 @@ export class ScannerStateStore {
           });
         }
       }
+      // Migration v4 -> v5: dreamDealBias/auctionReminders fehlen in alten Dateien.
+      for (const entry of parsed.dreamDealBias ?? []) {
+        if (entry?.profileName && typeof entry.thresholdBias === 'number') {
+          this.dreamDealBias.set(entry.profileName, {
+            profileName: entry.profileName,
+            thresholdBias: entry.thresholdBias,
+            recentReactions: Array.isArray(entry.recentReactions) ? entry.recentReactions : [],
+            lastAdjustedAt: entry.lastAdjustedAt,
+            lastDecayAt: entry.lastDecayAt,
+            auditLog: Array.isArray(entry.auditLog) ? entry.auditLog : [],
+          });
+        }
+      }
+      this.auctionReminders = (parsed.auctionReminders ?? []).filter((entry): entry is AuctionReminderRecord =>
+        Boolean(entry?.listingId && entry?.remindAt && entry?.itemEndDate && entry?.messageId && entry?.status));
       for (const entry of parsed.reactionRoutes ?? []) {
         if (entry?.messageId && entry?.type && entry?.createdAt) {
           this.reactionRoutes.set(entry.messageId, entry);
@@ -772,6 +1073,18 @@ export class ScannerStateStore {
         this.reactionRoutes.delete(messageId);
       }
     }
+
+    // D: abgearbeitete/alte Reminder entfernen; pending mit abgelaufener Endzeit
+    // ebenfalls droppen (das Listing ist weg, der Tick wuerde es sonst nie raeumen).
+    this.auctionReminders = this.auctionReminders.filter(reminder => {
+      if (new Date(reminder.createdAt).getTime() < seenCutoff) {
+        return false;
+      }
+      if (reminder.status === 'pending' && new Date(reminder.itemEndDate).getTime() < referenceTimestamp - 60 * 60 * 1000) {
+        return false;
+      }
+      return true;
+    });
   }
 
   private toObservation(result: EvaluatedListing, observedAt: string): ObservationRecord {
@@ -816,12 +1129,14 @@ export class ScannerStateStore {
   private async persist(): Promise<void> {
     const statePath = getStatePath();
     await writeFileAtomic(statePath, JSON.stringify({
-      version: 4,
+      version: 5,
       updatedAt: new Date().toISOString(),
       metadata: this.metadata,
       seen: Array.from(this.seen.values()).sort((left, right) => left.sentAt.localeCompare(right.sentAt)),
       observations: this.observations.sort((left, right) => left.observedAt.localeCompare(right.observedAt)),
       profileBias: Array.from(this.profileBias.values()).sort((left, right) => left.profileName.localeCompare(right.profileName)),
+      dreamDealBias: Array.from(this.dreamDealBias.values()).sort((left, right) => left.profileName.localeCompare(right.profileName)),
+      auctionReminders: this.auctionReminders.slice().sort((left, right) => left.remindAt.localeCompare(right.remindAt)),
       reactionRoutes: Array.from(this.reactionRoutes.values()).sort((left, right) => left.createdAt.localeCompare(right.createdAt)),
     } satisfies ScannerStateFile, null, 2), env.SCANNER_STATE_BACKUP_COUNT);
   }

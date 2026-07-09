@@ -229,10 +229,70 @@ test('reaction routes are registered on send and resolvable afterwards', async (
 
   await store.recordSent(buildResult({}), { messageId: 'msg-42', channelId: 'chan-1' });
   const route = store.getReactionRoute('msg-42');
-  assert.equal(route?.type, 'acceptance-feedback');
+  assert.equal(route?.type, 'gpu-alert');
   assert.equal(route?.profileName, 'RTX 3090');
   assert.equal(route?.listingId, 'listing-1');
 
   await store.registerReactionRoute({ messageId: 'msg-99', type: 'acceptance-reset', profileName: 'RTX 3090' });
   assert.equal(store.getReactionRoute('msg-99')?.type, 'acceptance-reset');
+});
+
+// --- C1: Dream-Deal-Threshold-Bias + Audit-Log ---
+test('recordDreamDealReaction adjusts threshold at 3 of 5 and logs an audit entry', async () => {
+  const store = await freshStore();
+  const base = store.getDreamDealThreshold('RTX 3090');
+
+  assert.equal((await store.recordDreamDealReaction('RTX 3090', 'up')).adjusted, false);
+  assert.equal((await store.recordDreamDealReaction('RTX 3090', 'up')).adjusted, false);
+  const third = await store.recordDreamDealReaction('RTX 3090', 'up'); // 🧊 -> Schwelle hoch
+  assert.equal(third.adjusted, true);
+  assert.equal(store.getDreamDealThreshold('RTX 3090'), base + 3);
+
+  const reset = await store.resetDreamDealBias('RTX 3090');
+  assert.equal(reset.adjusted, true);
+  assert.equal(store.getDreamDealThreshold('RTX 3090'), base);
+});
+
+// --- D: Auktions-Reminder ---
+test('scheduleAuctionReminder respects end date and dedupes per listing', async () => {
+  const store = await freshStore();
+
+  // Kein Reminder ohne bekannte Endzeit.
+  await store.recordSent(buildResult({}), { messageId: 'm1', channelId: 'c1' });
+  assert.equal(store.scheduleAuctionReminder({ listingId: 'listing-1', channelId: 'c1', messageId: 'm1', userId: 'u1', leadMinutes: 20 }).reason, 'no_end_date');
+
+  // Zukuenftige Endzeit -> geplant; zweiter Aufruf -> already_scheduled.
+  const future = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+  const listing = { ...buildResult({}).listing, id: 'auction-1', itemEndDate: future, buyingOptions: ['AUCTION' as const] };
+  await store.recordSent(buildResult({ listing }), { messageId: 'm2', channelId: 'c1' });
+  const first = store.scheduleAuctionReminder({ listingId: 'auction-1', channelId: 'c1', messageId: 'm2', userId: 'u1', leadMinutes: 20 });
+  assert.equal(first.scheduled, true);
+  assert.equal(store.scheduleAuctionReminder({ listingId: 'auction-1', channelId: 'c1', messageId: 'm2', userId: 'u2', leadMinutes: 20 }).reason, 'already_scheduled');
+
+  // Faellige Reminder werden geliefert und lassen sich abhaken.
+  const due = store.getAuctionRemindersDue(new Date(future).getTime());
+  assert.equal(due.length, 1);
+  await store.markAuctionReminder('auction-1', 'fired');
+  assert.equal(store.getAuctionRemindersDue(new Date(future).getTime()).length, 0);
+});
+
+// --- B2: Deal-Timing ---
+test('assessDealTiming reports buy_now when recent prices exceed the older window', async () => {
+  const store = await freshStore();
+  const now = Date.now();
+  const day = 24 * 60 * 60 * 1000;
+
+  // 3 alte (guenstig) + 2 neue (teuer) -> Preise steigen -> buy_now.
+  for (const [i, price] of [200, 205, 210].entries()) {
+    const obs = buildResult({ listing: { ...buildResult({}).listing, id: `old-${i}`, totalEur: price }, health: 'WORKING' });
+    await store.recordObservation(obs, new Date(now - 20 * day).toISOString());
+  }
+  for (const [i, price] of [260, 265].entries()) {
+    const obs = buildResult({ listing: { ...buildResult({}).listing, id: `new-${i}`, totalEur: price }, health: 'WORKING' });
+    await store.recordObservation(obs, new Date(now - 1 * day).toISOString());
+  }
+
+  const timing = store.assessDealTiming('RTX 3090', 'WORKING', now);
+  assert.ok(timing, 'expected a timing assessment');
+  assert.equal(timing?.verdict, 'buy_now');
 });

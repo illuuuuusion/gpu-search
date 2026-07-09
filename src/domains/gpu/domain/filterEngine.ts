@@ -4,6 +4,7 @@ import type { EbayListing, EvaluatedListing, GpuProfile, ListingHealth, OfferTyp
 import { assessRepairability } from './repairabilityScore.js';
 import { buildListingSearchText, compactComparableText, getListingTextSources, normalizeListingText } from './listingSignals.js';
 import { listingMatchesAlias } from './aliasMatcher.js';
+import { matchesRuntimeExclusion } from './runtimeExclusions.js';
 
 const allowedCountries = new Set(env.ALLOW_COUNTRIES.split(',').map(v => v.trim().toUpperCase()));
 const accessoryPatterns: Array<{ reason: string; regex: RegExp }> = [
@@ -219,6 +220,15 @@ export function evaluateListing(
   for (const negative of profile.negativeAliases) {
     if (listingMatchesAlias(searchNormalized, searchCompact, negative)) {
       reasons.push(`negative_alias=${negative}`);
+      return rejectedResult(profile, listing, 'EXCLUDED', reasons);
+    }
+  }
+
+  // C2: laufzeit-gemeldete Ausschlussbegriffe (pro Profil), sofern aktiviert.
+  if (env.RUNTIME_EXCLUSIONS_ENABLED) {
+    const runtimeHit = matchesRuntimeExclusion(searchNormalized, profile.name);
+    if (runtimeHit) {
+      reasons.push(`runtime_exclusion=${runtimeHit}`);
       return rejectedResult(profile, listing, 'EXCLUDED', reasons);
     }
   }

@@ -45,13 +45,22 @@ const DISCORD_ADMIN_USER_IDS = allowedAdminIds;
 const ACCEPTANCE_UP_EMOJI = '👍';
 const ACCEPTANCE_DOWN_EMOJI = '👎';
 const ACCEPTANCE_RESET_EMOJI = '↩️';
+const EXCLUSION_EMOJI = '🚫';
+const AUCTION_REMINDER_EMOJI = '⏰';
+const DREAM_DEAL_UP_EMOJI = '🔥';
+const DREAM_DEAL_DOWN_EMOJI = '🧊';
+const EXCLUSIONS_COMMAND = 'exclusions';
 function formatSignedPercent(bias) {
     const percent = bias * 100;
     const sign = percent > 0 ? '+' : '';
     return `${sign}${percent.toFixed(1)} %`;
 }
 function toDiscordColor(color) {
-    return color === 'danger' ? 0xED4245 : 0x57F287;
+    if (color === 'danger')
+        return 0xED4245;
+    if (color === 'dream')
+        return 0xF1C40F; // Gold: klar abgesetzt von normalen Alerts
+    return 0x57F287;
 }
 function formatDiscordTimestamp(isoTimestamp) {
     const unixTimestamp = Math.floor(new Date(isoTimestamp).getTime() / 1000);
@@ -557,23 +566,23 @@ export class DiscordNotifier {
         }
     }
     registerReactionHandlers() {
-        // B5: 👍/👎 auf normale Alerts verschieben den Akzeptanz-Bias.
-        this.reactionRouter.register('acceptance-feedback', async (event) => {
-            const direction = event.emoji === ACCEPTANCE_UP_EMOJI
-                ? 'up'
-                : event.emoji === ACCEPTANCE_DOWN_EMOJI
-                    ? 'down'
-                    : null;
-            if (!direction || !event.route.profileName || !this.options.onAcceptanceFeedback) {
-                return;
+        // Kombinierter Handler fuer normale Alerts: dispatcht per Emoji auf
+        // B5 (👍/👎), C2 (🚫) und D (⏰). 'acceptance-feedback' bleibt als Alias fuer
+        // vor dem Update persistierte Routen registriert.
+        const handleGpuAlert = async (event) => {
+            if (event.emoji === ACCEPTANCE_UP_EMOJI || event.emoji === ACCEPTANCE_DOWN_EMOJI) {
+                await this.handleAcceptanceReaction(event, event.emoji === ACCEPTANCE_UP_EMOJI ? 'up' : 'down');
             }
-            const result = await this.options.onAcceptanceFeedback({ profileName: event.route.profileName, direction });
-            if (!result?.adjusted) {
-                return;
+            else if (event.emoji === EXCLUSION_EMOJI) {
+                await this.handleExclusionReport(event);
             }
-            await this.postBiasAdjustment(event, result.profileName, result.previousBias, result.bias);
-        });
-        // B5: ↩️ auf die Info-Nachricht setzt den Bias des Profils zurueck.
+            else if (event.emoji === AUCTION_REMINDER_EMOJI) {
+                await this.handleAuctionReminderRequest(event);
+            }
+        };
+        this.reactionRouter.register('gpu-alert', handleGpuAlert);
+        this.reactionRouter.register('acceptance-feedback', handleGpuAlert);
+        // B5: ↩️ auf die Info-Nachricht setzt den Akzeptanz-Bias des Profils zurueck.
         this.reactionRouter.register('acceptance-reset', async (event) => {
             if (event.emoji !== ACCEPTANCE_RESET_EMOJI || !event.route.profileName || !this.options.onAcceptanceReset) {
                 return;
@@ -587,6 +596,152 @@ export class DiscordNotifier {
                 allowedMentions: { parse: [] },
             }).catch(error => logger.warn({ error }, 'failed to confirm bias reset'));
         });
+        // C1: 🔥/🧊 auf Dream-Deal-Sondernachrichten recalibrieren die Schwelle.
+        this.reactionRouter.register('dream-deal-feedback', async (event) => {
+            const direction = event.emoji === DREAM_DEAL_UP_EMOJI
+                ? 'down' // 🔥 = "echter Dream Deal" -> Schwelle senken (leichter)
+                : event.emoji === DREAM_DEAL_DOWN_EMOJI
+                    ? 'up' // 🧊 = "kein Dream Deal" -> Schwelle anheben (strenger)
+                    : null;
+            if (!direction || !event.route.profileName || !this.options.onDreamDealFeedback) {
+                return;
+            }
+            const result = await this.options.onDreamDealFeedback({ profileName: event.route.profileName, direction });
+            if (!result?.adjusted) {
+                return;
+            }
+            await this.postDreamDealAdjustment(event, result.profileName, result.previousThreshold, result.threshold);
+        });
+        // C1: ↩️ auf die Dream-Deal-Info setzt die Schwelle zurueck.
+        this.reactionRouter.register('dream-deal-reset', async (event) => {
+            if (event.emoji !== ACCEPTANCE_RESET_EMOJI || !event.route.profileName || !this.options.onDreamDealReset) {
+                return;
+            }
+            const result = await this.options.onDreamDealReset(event.route.profileName);
+            if (!result.adjusted) {
+                return;
+            }
+            await event.reaction.message.reply({
+                content: `↩️ Dream-Deal-Schwelle für **${event.route.profileName}** auf ${result.threshold.toFixed(1)} zurückgesetzt.`,
+                allowedMentions: { parse: [] },
+            }).catch(error => logger.warn({ error }, 'failed to confirm dream deal reset'));
+        });
+    }
+    async handleAcceptanceReaction(event, direction) {
+        if (!event.route.profileName || !this.options.onAcceptanceFeedback) {
+            return;
+        }
+        const result = await this.options.onAcceptanceFeedback({ profileName: event.route.profileName, direction });
+        if (!result?.adjusted) {
+            return;
+        }
+        await this.postBiasAdjustment(event, result.profileName, result.previousBias, result.bias);
+    }
+    // C2: 🚫 -> Original markieren, Ausschlussbegriff per Textnachricht einsammeln.
+    async handleExclusionReport(event) {
+        if (!env.RUNTIME_EXCLUSIONS_ENABLED || !event.route.profileName || !this.options.onExclusionReport) {
+            return;
+        }
+        const message = event.reaction.message;
+        const profileName = event.route.profileName;
+        const listingId = event.route.listingId ?? '';
+        const listingTitle = message.embeds[0]?.description ?? message.embeds[0]?.title ?? '';
+        const channel = message.channel;
+        if (!channel.isTextBased() || !channel.isSendable()) {
+            return;
+        }
+        await message.reply({
+            content: `🚫 Fehltreffer für **${profileName}** gemeldet. Bitte antworte innerhalb von 2 Minuten mit dem **Ausschlussbegriff** (Wort/Wortgruppe), der solche Angebote künftig filtern soll.`,
+            allowedMentions: { parse: [] },
+        }).catch(error => logger.warn({ error }, 'failed to prompt for exclusion term'));
+        let collected;
+        try {
+            collected = await channel.awaitMessages({
+                filter: (candidate) => candidate.author.id === event.userId,
+                max: 1,
+                time: 120_000,
+                errors: ['time'],
+            });
+        }
+        catch {
+            await message.reply({ content: '⌛ Keine Antwort erhalten – Meldung verworfen.', allowedMentions: { parse: [] } })
+                .catch(() => undefined);
+            return;
+        }
+        const term = collected.first()?.content?.trim() ?? '';
+        if (!term) {
+            await message.reply({ content: 'Leerer Begriff – Meldung verworfen.', allowedMentions: { parse: [] } }).catch(() => undefined);
+            return;
+        }
+        const result = await this.options.onExclusionReport({
+            profileName,
+            term,
+            reportedByUserId: event.userId,
+            originalListingId: listingId,
+            originalListingTitle: listingTitle,
+        });
+        if (result.status === 'blocked') {
+            const detail = result.blockedBy
+                ? ` Das würde auch echte **${result.blockedBy.alias}**-Angebote von **${result.blockedBy.profileName}** blockieren – bitte spezifischer.`
+                : '';
+            await message.reply({ content: `⚠️ Ausschluss \`${result.term}\` abgelehnt.${detail}`, allowedMentions: { parse: [] } }).catch(() => undefined);
+            return;
+        }
+        await this.markListingReported(message, listingId);
+        await message.reply({ content: `✅ Ausschlussbegriff \`${result.term}\` für **${profileName}** aktiv. Greift ab dem nächsten Scan.`, allowedMentions: { parse: [] } })
+            .catch(() => undefined);
+    }
+    async markListingReported(message, listingId) {
+        const existingEmbed = message.embeds[0];
+        if (!existingEmbed) {
+            return;
+        }
+        const embed = EmbedBuilder.from(existingEmbed).setColor(0x99AAB5).setFooter({
+            text: listingId ? buildGpuAlertFooterText(listingId, 'Als Fehltreffer gemeldet') : `${ALERT_FOOTER_TEXT} • Als Fehltreffer gemeldet`,
+        });
+        await message.edit({ embeds: [embed], allowedMentions: { parse: [] } }).catch(error => logger.warn({ error }, 'failed to mark listing reported'));
+    }
+    // D: ⏰ -> Reminder kurz vor Auktionsende planen (gemeinsam pro Listing).
+    async handleAuctionReminderRequest(event) {
+        if (!env.AUCTION_REMINDER_ENABLED || !event.route.listingId || !this.options.onAuctionReminderRequested) {
+            return;
+        }
+        const result = await this.options.onAuctionReminderRequested({
+            listingId: event.route.listingId,
+            channelId: event.channelId,
+            messageId: event.messageId,
+            userId: event.userId,
+        });
+        const reply = result.scheduled && result.remindAt
+            ? `⏰ Reminder gesetzt für ${formatDiscordTimestamp(result.remindAt)}.`
+            : result.reason === 'already_scheduled'
+                ? '⏰ Für dieses Angebot ist bereits ein Reminder aktiv.'
+                : result.reason === 'already_ended'
+                    ? 'Die Auktion ist bereits beendet – kein Reminder möglich.'
+                    : 'Für dieses Angebot ist keine Auktions-Endzeit bekannt.';
+        await event.reaction.message.reply({ content: reply, allowedMentions: { parse: [] } })
+            .catch(error => logger.warn({ error }, 'failed to confirm auction reminder'));
+    }
+    async postDreamDealAdjustment(event, profileName, previousThreshold, threshold) {
+        const info = await event.reaction.message.reply({
+            content: `🌟 **${profileName}**: Dream-Deal-Schwelle ${previousThreshold.toFixed(1)} → ${threshold.toFixed(1)}`
+                + ` (wirkt ab dem nächsten Scan). ${ACCEPTANCE_RESET_EMOJI} zum Zurücksetzen.`,
+            allowedMentions: { parse: [] },
+        }).catch(error => {
+            logger.warn({ error, profileName }, 'failed to post dream deal adjustment');
+            return null;
+        });
+        if (!info) {
+            return;
+        }
+        await info.react(ACCEPTANCE_RESET_EMOJI).catch(error => logger.warn({ error }, 'failed to add dream deal reset reaction'));
+        if (this.options.onRegisterReactionRoute) {
+            await this.options.onRegisterReactionRoute(info.id, {
+                type: 'dream-deal-reset',
+                profileName,
+                channelId: info.channelId,
+            });
+        }
     }
     async start() {
         if (this.client.isReady()) {
@@ -637,6 +792,15 @@ export class DiscordNotifier {
                 return;
             }
         }
+        if (reaction.message.partial) {
+            try {
+                await reaction.message.fetch();
+            }
+            catch (error) {
+                logger.warn({ error }, 'failed to fetch partial reaction message');
+                return;
+            }
+        }
         const messageId = reaction.message.id;
         const route = await this.options.onReactionRouteRequested(messageId);
         if (!route) {
@@ -683,14 +847,65 @@ export class DiscordNotifier {
         });
         this.nextSendAt = Date.now() + env.DISCORD_SEND_DELAY_MS;
         if (env.REACTIONS_ENABLED) {
-            // 👍/👎 fuer B5-Feedback direkt an den Alert haengen (best effort).
-            await sentMessage.react(ACCEPTANCE_UP_EMOJI).catch(() => undefined);
-            await sentMessage.react(ACCEPTANCE_DOWN_EMOJI).catch(() => undefined);
+            // Feature-Reactions (👍/👎 B5, 🚫 C2, ⏰ D) best effort in Reihenfolge anhaengen.
+            for (const emoji of message.reactions ?? [ACCEPTANCE_UP_EMOJI, ACCEPTANCE_DOWN_EMOJI]) {
+                await sentMessage.react(emoji).catch(() => undefined);
+            }
         }
         return {
             messageId: sentMessage.id,
             channelId: sentMessage.channelId,
         };
+    }
+    // C1: Dream-Deal-Sondernachricht senden, 🔥/🧊 anhaengen, Route registrieren.
+    async sendDreamDealAlert(message, route) {
+        await this.start();
+        await this.waitForSendWindow();
+        const channel = await this.fetchMessageChannel();
+        const sentMessage = await channel.send({
+            embeds: [this.buildAlertEmbed(message)],
+            allowedMentions: { parse: [] },
+        });
+        this.nextSendAt = Date.now() + env.DISCORD_SEND_DELAY_MS;
+        if (env.REACTIONS_ENABLED) {
+            for (const emoji of message.reactions ?? [DREAM_DEAL_UP_EMOJI, DREAM_DEAL_DOWN_EMOJI]) {
+                await sentMessage.react(emoji).catch(() => undefined);
+            }
+            if (this.options.onRegisterReactionRoute) {
+                await this.options.onRegisterReactionRoute(sentMessage.id, {
+                    type: 'dream-deal-feedback',
+                    profileName: route.profileName,
+                    listingId: route.listingId,
+                    channelId: sentMessage.channelId,
+                });
+            }
+        }
+    }
+    async sendAuctionReminder(reminder) {
+        await this.start();
+        await this.waitForSendWindow();
+        const channel = await this.fetchMessageChannel();
+        const priceLine = reminder.currentPriceEur !== undefined
+            ? `Aktueller Preis/Gebot: **${reminder.currentPriceEur.toFixed(2)} €**`
+            : 'Aktueller Preis: unbekannt';
+        const bidLine = reminder.currentBidCount !== undefined ? ` (${reminder.currentBidCount} Gebote)` : '';
+        const embed = new EmbedBuilder()
+            .setColor(0xE67E22)
+            .setTitle(`⏰ Auktion endet bald | ${reminder.profileName}`)
+            .setDescription(`${priceLine}${bidLine}\nEndet: ${formatDiscordTimestamp(reminder.itemEndDate)}`)
+            .setFooter({ text: ALERT_FOOTER_TEXT });
+        await channel.send({ embeds: [embed], allowedMentions: { parse: [] } });
+        this.nextSendAt = Date.now() + env.DISCORD_SEND_DELAY_MS;
+    }
+    async sendReminderCancellation(reminder) {
+        await this.start();
+        await this.waitForSendWindow();
+        const channel = await this.fetchMessageChannel();
+        await channel.send({
+            content: `⏰ Reminder für **${reminder.profileName}** storniert: Angebot ist nicht mehr verfügbar.`,
+            allowedMentions: { parse: [] },
+        });
+        this.nextSendAt = Date.now() + env.DISCORD_SEND_DELAY_MS;
     }
     async listActiveGpuListingIds() {
         await this.start();
@@ -1208,6 +1423,18 @@ export class DiscordNotifier {
                 .setDescription('Zeigt an, wann der nächste automatische Scan geplant ist.')
                 .toJSON(),
             new SlashCommandBuilder()
+                .setName(EXCLUSIONS_COMMAND)
+                .setDescription('Verwaltet laufzeit-gemeldete Ausschlussbegriffe (C2).')
+                .addSubcommand(subcommand => subcommand
+                .setName('review')
+                .setDescription('Listet aktive Ausschlussbegriffe der letzten Tage.')
+                .addIntegerOption(option => option.setName('days').setDescription('Zeitraum in Tagen (Standard 30)').setRequired(false)))
+                .addSubcommand(subcommand => subcommand
+                .setName('undo')
+                .setDescription('Deaktiviert einen Ausschlussbegriff per ID.')
+                .addStringOption(option => option.setName('id').setDescription('Ausschluss-ID aus /exclusions review').setRequired(true)))
+                .toJSON(),
+            new SlashCommandBuilder()
                 .setName(CONFIG_COMMAND)
                 .setDescription('Verwaltet Discord-Bot-Features für diesen Server.')
                 .addSubcommand(subcommand => subcommand
@@ -1354,6 +1581,7 @@ export class DiscordNotifier {
             interaction.commandName !== FORCE_RESCAN_COMMAND &&
             interaction.commandName !== DEBUG_SCAN_COMMAND &&
             interaction.commandName !== SCAN_INFO_COMMAND &&
+            interaction.commandName !== EXCLUSIONS_COMMAND &&
             interaction.commandName !== CONFIG_COMMAND &&
             interaction.commandName !== POLL_COMMAND &&
             interaction.commandName !== DELETE_COMMAND &&
@@ -1758,6 +1986,23 @@ export class DiscordNotifier {
                 await interaction.editReply(`Scanner-State wurde zurückgesetzt. Seen: ${result?.seenCount ?? 0}, Beobachtungen: ${result?.observationCount ?? 0}.`);
                 return;
             }
+            if (interaction.commandName === EXCLUSIONS_COMMAND) {
+                const subcommand = interaction.options.getSubcommand();
+                if (subcommand === 'undo') {
+                    const id = interaction.options.getString('id', true);
+                    const reverted = await this.options.onExclusionUndo?.(id);
+                    await interaction.editReply(reverted ? `Ausschluss \`${id}\` wurde deaktiviert.` : `Kein aktiver Ausschluss mit ID \`${id}\` gefunden.`);
+                    return;
+                }
+                const days = interaction.options.getInteger('days') ?? 30;
+                const exclusions = (await this.options.onExclusionReview?.(days)) ?? [];
+                await interaction.editReply(exclusions.length === 0
+                    ? `Keine aktiven Ausschlussbegriffe in den letzten ${days} Tagen.`
+                    : exclusions.slice(0, 25)
+                        .map(exclusion => `\`${exclusion.id}\` • **${exclusion.profileName}**: \`${exclusion.term}\` (${exclusion.reportedAt.slice(0, 10)})`)
+                        .join('\n'));
+                return;
+            }
             const result = interaction.commandName === FORCE_RESCAN_COMMAND
                 ? await this.options.onForceRescanRequested?.()
                 : interaction.commandName === DEBUG_SCAN_COMMAND
@@ -1812,6 +2057,9 @@ export class DiscordNotifier {
             }
             else if (interaction.commandName === SCAN_INFO_COMMAND) {
                 await interaction.editReply('Scan-Info konnte nicht geladen werden.');
+            }
+            else if (interaction.commandName === EXCLUSIONS_COMMAND) {
+                await interaction.editReply('Ausschlussbegriffe konnten nicht verarbeitet werden.');
             }
             else if (interaction.commandName === VCT_SYNC_COMMAND || interaction.commandName === VCT_SCAN_COMMAND) {
                 const formattedError = formatInteractionErrorMessage(error);

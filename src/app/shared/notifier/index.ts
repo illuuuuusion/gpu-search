@@ -1,4 +1,4 @@
-import type { MarketDigestMessage } from '../../../domains/gpu/domain/models.js';
+import type { AuctionReminderFired, AuctionReminderInfo, MarketDigestMessage } from '../../../domains/gpu/domain/models.js';
 
 export interface AlertField {
   name: string;
@@ -11,9 +11,10 @@ export interface AlertMessage {
   description: string;
   url: string;
   imageUrl?: string;
-  color: 'success' | 'danger';
+  color: 'success' | 'danger' | 'dream';
   fields: AlertField[];
   listingId?: string;
+  reactions?: string[]; // Emojis, die nach dem Senden angehaengt werden
 }
 
 export interface NotificationReceipt {
@@ -52,10 +53,15 @@ export interface ValorantSyncStatusMessage {
 export interface Notifier {
   start?(): Promise<void>;
   send(message: AlertMessage): Promise<NotificationReceipt | void>;
+  // C1: optisch abgesetzte Dream-Deal-Sondernachricht mit 🔥/🧊-Feedback.
+  sendDreamDealAlert?(message: AlertMessage, route: { profileName: string; listingId: string }): Promise<void>;
   listActiveGpuListingIds?(): Promise<string[]>;
   sendScanStatus?(message: ScanStatusMessage): Promise<void>;
   sendValorantSyncStatus?(message: ValorantSyncStatusMessage): Promise<void>;
   sendMarketDigest?(message: MarketDigestMessage): Promise<void>;
+  // D: Auktions-Sniper-Reminder.
+  sendAuctionReminder?(reminder: AuctionReminderFired): Promise<void>;
+  sendReminderCancellation?(reminder: AuctionReminderInfo): Promise<void>;
   markUnavailable?(receipt: NotificationReceipt, details: { reason: string; checkedAt: string }): Promise<void>;
   delete?(receipt: NotificationReceipt): Promise<void>;
 }
@@ -95,6 +101,18 @@ export class ConsoleNotifier implements Notifier {
     console.log(
       `[market-digest] cadence=${message.cadence} accepted=${message.totalAcceptedListings} working=${message.totalWorkingListings} defect=${message.totalDefectListings} snapshot=${message.snapshotPath} top=${topProfiles}`,
     );
+  }
+
+  async sendDreamDealAlert(message: AlertMessage): Promise<void> {
+    console.log('\n--- 🌟 DREAM DEAL 🌟 ---\n' + renderAlertMessage(message) + '\n--------------\n');
+  }
+
+  async sendAuctionReminder(reminder: AuctionReminderFired): Promise<void> {
+    console.log(`[auction-reminder] listing=${reminder.listingId} profile=${reminder.profileName} price=${reminder.currentPriceEur ?? 'n/a'}€ endsAt=${reminder.itemEndDate}`);
+  }
+
+  async sendReminderCancellation(reminder: AuctionReminderInfo): Promise<void> {
+    console.log(`[auction-reminder-cancelled] listing=${reminder.listingId} profile=${reminder.profileName}`);
   }
 
   async delete(): Promise<void> {

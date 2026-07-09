@@ -59,6 +59,31 @@ const envSchema = z.object({
   ALLOWED_REACTOR_IDS: z.string().default(''),
   REACTIONS_ENABLED: booleanFromString.default(false),
   ADAPTIVE_THRESHOLD_ENABLED: booleanFromString.default(true),
+  // C1: Dream-Deal-Score. Startschwelle 15 (= Deal-Score/Headroom in Prozent).
+  DREAM_DEAL_ENABLED: booleanFromString.default(true),
+  DREAM_DEAL_MIN_SCORE: z.coerce.number().default(15),
+  // C2: Laufzeit-Ausschlussbegriffe (pro Profil), permissive Levenshtein-Kalibrierung.
+  RUNTIME_EXCLUSIONS_ENABLED: booleanFromString.default(true),
+  EXCLUSION_SIMILARITY_MAX_DISTANCE: z.coerce.number().int().min(0).default(2),
+  EXCLUSIONS_STATE_PATH: optionalString,
+  // D: Auktions-Sniper-Reminder (gemeinsam pro Listing, fester Lead von 20 Min).
+  AUCTION_REMINDER_ENABLED: booleanFromString.default(true),
+  AUCTION_REMINDER_LEAD_MINUTES: positiveInteger.default(20),
+  AUCTION_REMINDER_CHECK_INTERVAL_SECONDS: positiveInteger.default(60),
+  // B2: Kauf-jetzt-oder-warten aus eigener Beobachtungs-Historie.
+  DEAL_TIMING_ENABLED: booleanFromString.default(true),
+  DEAL_TIMING_MIN_SAMPLES: positiveInteger.default(4),
+  // B6: regelbasiertes Alias-Fallback (nur Logging, kein Live-Alarm).
+  ALIAS_FALLBACK_ENABLED: booleanFromString.default(true),
+  ALIAS_FALLBACK_MIN_SIMILARITY: z.coerce.number().min(0).max(1).default(0.72),
+  ALIAS_FALLBACK_LOG_PATH: optionalString,
+  // B4: Cross-Marketplace-Arbitrage (Kleinanzeigen). Standardmaessig aus,
+  // bis die Scraping-Selektoren gegen die Live-Seite verifiziert sind.
+  KLEINANZEIGEN_ENABLED: booleanFromString.default(false),
+  KLEINANZEIGEN_BASE_URL: z.string().default('https://www.kleinanzeigen.de'),
+  ARBITRAGE_MIN_MARGIN_EUR: z.coerce.number().default(40),
+  ARBITRAGE_RESELL_FEE_PERCENT: z.coerce.number().min(0).max(100).default(12),
+  ARBITRAGE_RESELL_SHIPPING_EUR: z.coerce.number().min(0).default(8),
   DISCORD_ADMIN_STATE_PATH: optionalString,
   DISCORD_SEND_DELAY_MS: milliseconds.default(750),
   DISCORD_RATE_LIMIT_BUFFER_MS: milliseconds.default(250),
@@ -124,6 +149,24 @@ interface AppEnv {
   ALLOWED_REACTOR_IDS: string;
   REACTIONS_ENABLED: boolean;
   ADAPTIVE_THRESHOLD_ENABLED: boolean;
+  DREAM_DEAL_ENABLED: boolean;
+  DREAM_DEAL_MIN_SCORE: number;
+  RUNTIME_EXCLUSIONS_ENABLED: boolean;
+  EXCLUSION_SIMILARITY_MAX_DISTANCE: number;
+  EXCLUSIONS_STATE_PATH?: string;
+  AUCTION_REMINDER_ENABLED: boolean;
+  AUCTION_REMINDER_LEAD_MINUTES: number;
+  AUCTION_REMINDER_CHECK_INTERVAL_SECONDS: number;
+  DEAL_TIMING_ENABLED: boolean;
+  DEAL_TIMING_MIN_SAMPLES: number;
+  ALIAS_FALLBACK_ENABLED: boolean;
+  ALIAS_FALLBACK_MIN_SIMILARITY: number;
+  ALIAS_FALLBACK_LOG_PATH?: string;
+  KLEINANZEIGEN_ENABLED: boolean;
+  KLEINANZEIGEN_BASE_URL: string;
+  ARBITRAGE_MIN_MARGIN_EUR: number;
+  ARBITRAGE_RESELL_FEE_PERCENT: number;
+  ARBITRAGE_RESELL_SHIPPING_EUR: number;
   DISCORD_ADMIN_STATE_PATH?: string;
   DISCORD_SEND_DELAY_MS: number;
   DISCORD_RATE_LIMIT_BUFFER_MS: number;
