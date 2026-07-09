@@ -1,9 +1,16 @@
+import './shared/telemetry.js'; // Seiteneffekt: Telemetrie-SDK vor allem anderen starten
 import { GpuModule } from '../domains/gpu/module.js';
 import { ValorantModule } from '../domains/valorant/module.js';
 import { env } from './env/index.js';
 import { DiscordNotifier } from '../integrations/discord/notifier.js';
 import { ConsoleNotifier } from './shared/notifier/index.js';
 import { logger } from './shared/logger.js';
+
+// Letztes Sicherheitsnetz: bewusst KEIN process.exit(), sonst wird die
+// gewuenschte Domain-Isolation wieder ausgehebelt (A5).
+process.on('unhandledRejection', reason => {
+  logger.error({ reason }, 'unhandled rejection');
+});
 
 async function bootstrap(): Promise<void> {
   const gpuModule = new GpuModule();
@@ -38,7 +45,13 @@ async function bootstrap(): Promise<void> {
     valorantEnabled: env.VALORANT_ENABLED,
   }, 'gpu-search started');
 
-  await gpuModule.start();
+  try {
+    await gpuModule.start();
+  } catch (error) {
+    // Symmetrisch zum Valorant-Block: Fehler isolieren, Prozess weiterlaufen
+    // lassen (Discord/Valorant bleiben verfuegbar), nicht process.exit().
+    logger.error({ error }, 'gpu module failed to start; continuing without scheduled scans');
+  }
 }
 
 bootstrap().catch(error => {

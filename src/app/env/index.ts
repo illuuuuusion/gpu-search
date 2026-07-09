@@ -1,5 +1,22 @@
 import 'dotenv/config';
+import fs from 'node:fs';
 import { z } from 'zod';
+
+// Docker-Secrets-Support: fuer sensible Werte darf statt des Klartext-Env-Vars
+// ein `${NAME}_FILE` gesetzt sein, das auf eine Datei zeigt (z. B. /run/secrets/x).
+// Fehler beim Lesen werden bewusst nicht abgefangen -> Fail-Fast vor jedem Login.
+const SECRET_FILE_VARS = ['DISCORD_BOT_TOKEN', 'EBAY_CLIENT_SECRET'] as const;
+
+export function resolveSecretFileOverrides(): void {
+  for (const name of SECRET_FILE_VARS) {
+    const filePath = process.env[`${name}_FILE`];
+    if (filePath) {
+      process.env[name] = fs.readFileSync(filePath, 'utf8').trim();
+    }
+  }
+}
+
+resolveSecretFileOverrides();
 
 const optionalString = z.preprocess(
   value => typeof value === 'string' ? value.trim() || undefined : value,
@@ -36,12 +53,19 @@ const envSchema = z.object({
   NOTIFIER_PROVIDER: z.enum(['console', 'discord']).default('console'),
   DISCORD_BOT_TOKEN: optionalString,
   DISCORD_CHANNEL_ID: optionalString,
+  // Komma-separierte User-ID-Listen (Pattern wie ALLOW_COUNTRIES).
+  ALLOWED_ADMIN_IDS: z.string().default('504707482547912714,689513442867937321'),
+  // Leer -> faellt in der Notifier-Schicht auf ALLOWED_ADMIN_IDS zurueck.
+  ALLOWED_REACTOR_IDS: z.string().default(''),
+  REACTIONS_ENABLED: booleanFromString.default(false),
+  ADAPTIVE_THRESHOLD_ENABLED: booleanFromString.default(true),
   DISCORD_ADMIN_STATE_PATH: optionalString,
   DISCORD_SEND_DELAY_MS: milliseconds.default(750),
   DISCORD_RATE_LIMIT_BUFFER_MS: milliseconds.default(250),
   DISCORD_MAX_SEND_RETRIES: z.coerce.number().int().min(0).max(10).default(5),
   SCANNER_STATE_PATH: optionalString,
   MARKET_SUMMARY_PATH: optionalString,
+  SCANNER_STATE_BACKUP_COUNT: z.coerce.number().int().min(0).default(3),
   SCANNER_AVAILABILITY_REFRESH_ENABLED: booleanFromString.default(true),
   SCANNER_AVAILABILITY_RECHECK_MINUTES: positiveInteger.default(12),
   SCANNER_AVAILABILITY_UNAVAILABLE_ACTION: z.enum(['delete', 'mark_expired']).default('delete'),
@@ -50,6 +74,8 @@ const envSchema = z.object({
   SCANNER_AVAILABILITY_RECHECK_HOURS: positiveInteger.default(6),
   SCANNER_AVAILABILITY_CHECK_BATCH_SIZE: positiveInteger.default(25),
   POLL_INTERVAL_SECONDS: positiveInteger.min(30).default(720),
+  OTEL_ENABLED: booleanFromString.default(false),
+  OTEL_PROMETHEUS_PORT: positiveInteger.max(65535).default(9464),
   ALLOW_COUNTRIES: z.string().default('DE,AT,CH,FR,BE,NL,LU,DK,PL,CZ'),
   MIN_SELLER_FEEDBACK_PERCENT: z.coerce.number().min(0).max(100).default(90),
   MAX_SHIPPING_HARD_CAP_EUR: z.coerce.number().min(0).default(25),
@@ -94,12 +120,17 @@ interface AppEnv {
   NOTIFIER_PROVIDER: 'console' | 'discord';
   DISCORD_BOT_TOKEN: string;
   DISCORD_CHANNEL_ID: string;
+  ALLOWED_ADMIN_IDS: string;
+  ALLOWED_REACTOR_IDS: string;
+  REACTIONS_ENABLED: boolean;
+  ADAPTIVE_THRESHOLD_ENABLED: boolean;
   DISCORD_ADMIN_STATE_PATH?: string;
   DISCORD_SEND_DELAY_MS: number;
   DISCORD_RATE_LIMIT_BUFFER_MS: number;
   DISCORD_MAX_SEND_RETRIES: number;
   SCANNER_STATE_PATH?: string;
   MARKET_SUMMARY_PATH?: string;
+  SCANNER_STATE_BACKUP_COUNT: number;
   SCANNER_AVAILABILITY_REFRESH_ENABLED: boolean;
   SCANNER_AVAILABILITY_RECHECK_MINUTES: number;
   SCANNER_AVAILABILITY_UNAVAILABLE_ACTION: 'delete' | 'mark_expired';
@@ -108,6 +139,8 @@ interface AppEnv {
   SCANNER_AVAILABILITY_RECHECK_HOURS: number;
   SCANNER_AVAILABILITY_CHECK_BATCH_SIZE: number;
   POLL_INTERVAL_SECONDS: number;
+  OTEL_ENABLED: boolean;
+  OTEL_PROMETHEUS_PORT: number;
   ALLOW_COUNTRIES: string;
   MIN_SELLER_FEEDBACK_PERCENT: number;
   MAX_SHIPPING_HARD_CAP_EUR: number;
@@ -148,6 +181,16 @@ export const env: AppEnv = {
     ? requireValue(parsed.DISCORD_CHANNEL_ID, 'DISCORD_CHANNEL_ID')
     : parsed.DISCORD_CHANNEL_ID ?? '',
 };
+
+function parseIdList(value: string): Set<string> {
+  return new Set(value.split(',').map(id => id.trim()).filter(Boolean));
+}
+
+export const allowedAdminIds = parseIdList(env.ALLOWED_ADMIN_IDS);
+// Reactor-Allowlist faellt auf die Admin-IDs zurueck, wenn nicht separat gesetzt.
+export const allowedReactorIds = env.ALLOWED_REACTOR_IDS.trim()
+  ? parseIdList(env.ALLOWED_REACTOR_IDS)
+  : allowedAdminIds;
 
 export function getEbayApiBaseUrl(): string {
   return env.EBAY_PROVIDER === 'sandbox'

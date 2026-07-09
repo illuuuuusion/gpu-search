@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fc from 'fast-check';
 import { assessRepairability } from './repairabilityScore.js';
 import type { EbayListing } from '../domain/models.js';
 
@@ -48,4 +49,15 @@ test('assessRepairability stays cautious on vague untested listings', () => {
 
   assert.ok(assessment.score >= 20 && assessment.score <= 45);
   assert.equal(assessment.confidence, 'medium');
+});
+
+test('property: assessRepairability score always stays within [0, 100]', () => {
+  fc.assert(
+    fc.property(fc.string(), fc.string(), fc.string(), (title, description, subtitle) => {
+      const assessment = assessRepairability(buildListing({ title, description, subtitle }));
+      assert.ok(assessment.score >= 0 && assessment.score <= 100, `score out of range: ${assessment.score}`);
+      assert.ok(['low', 'medium', 'high'].includes(assessment.confidence));
+    }),
+    { numRuns: 200 },
+  );
 });

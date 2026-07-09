@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fc from 'fast-check';
 import { evaluateListing } from './filterEngine.js';
+import { selectProfileForListing } from './profileMatcher.js';
+import { regressionListingTitles } from './__fixtures__/regressionListings.js';
 import type { EbayListing, GpuProfile } from '../domain/models.js';
 
 function buildListing(overrides: Partial<EbayListing>): EbayListing {
@@ -187,4 +190,62 @@ test('evaluateListing does not reject listing whose title contains a word that i
   // workingProfile has negativeAliases: ['3090 Ti'] — "3090" alone must not trigger
   const result = evaluateListing(workingProfile, listing);
   assert.equal(result.accepted, true);
+});
+
+const VALID_HEALTH = new Set(['WORKING', 'DEFECT', 'EXCLUDED', 'UNKNOWN']);
+
+test('property: evaluateListing never throws on arbitrary (even malformed) listings', () => {
+  fc.assert(
+    fc.property(
+      fc.record({
+        title: fc.string(),
+        description: fc.option(fc.string(), { nil: undefined }),
+        subtitle: fc.option(fc.string(), { nil: undefined }),
+        condition: fc.option(fc.string(), { nil: undefined }),
+        country: fc.option(fc.string(), { nil: undefined }),
+        priceEur: fc.double({ noNaN: true, min: -1000, max: 100000 }),
+        shippingEur: fc.double({ noNaN: true, min: -1000, max: 100000 }),
+        totalEur: fc.double({ noNaN: true, min: -1000, max: 100000 }),
+        sellerFeedbackPercent: fc.option(fc.double({ noNaN: true, min: 0, max: 100 }), { nil: undefined }),
+        buyingOptions: fc.subarray(['FIXED_PRICE', 'AUCTION'] as const, { minLength: 1 }),
+      }),
+      partial => {
+        const listing = buildListing(partial as Partial<EbayListing>);
+        const result = evaluateListing(workingProfile, listing);
+        assert.equal(typeof result.accepted, 'boolean');
+        assert.ok(VALID_HEALTH.has(result.health));
+        assert.ok(Number.isFinite(result.score));
+      },
+    ),
+    { numRuns: 200 },
+  );
+});
+
+test('regression corpus: no crashes, health always defined for real-world-shaped titles', () => {
+  for (const title of regressionListingTitles) {
+    const listing = buildListing({ title, description: title });
+    const evaluated = evaluateListing(workingProfile, listing);
+    assert.ok(VALID_HEALTH.has(evaluated.health), `health undefined for: ${title}`);
+    // selectProfileForListing must also stay crash-free on these titles.
+    assert.doesNotThrow(() => selectProfileForListing([workingProfile, repairProfile], listing));
+  }
+});
+
+test('evaluateListing applies the B5 acceptance-bias multiplier to the effective limit', () => {
+  const overLimit = buildListing({
+    title: 'GTX 1080 Ti defekt kein Bild startet noch',
+    priceEur: 47,
+    shippingEur: 5,
+    totalEur: 52, // base defect limit is 50 -> normally rejected
+  });
+
+  assert.equal(evaluateListing(repairProfile, overLimit).accepted, false);
+  assert.equal(
+    evaluateListing(repairProfile, overLimit, { effectiveLimitMultiplier: 1.1 }).accepted,
+    true,
+  );
+  assert.equal(
+    evaluateListing(repairProfile, overLimit, { effectiveLimitMultiplier: 0.9 }).accepted,
+    false,
+  );
 });

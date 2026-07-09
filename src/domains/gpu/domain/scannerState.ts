@@ -15,6 +15,7 @@ import type {
 } from '../domain/models.js';
 import type { NotificationReceipt } from '../../../app/shared/notifier/index.js';
 import { logger } from '../../../app/shared/logger.js';
+import { writeFileAtomic } from '../../../app/shared/atomicFile.js';
 
 const DEFAULT_STATE_PATH = path.resolve(process.cwd(), 'data/scanner-state.json');
 const DEFAULT_MARKET_SUMMARY_PATH = path.resolve(process.cwd(), 'data/market-summary.json');
@@ -56,12 +57,56 @@ interface ScannerStateMetadata {
   lastWeeklyDigestAt?: string;
 }
 
+// B5: begrenzter Laufzeit-Bias auf das Preislimit je Profil, gesteuert per Reaction.
+interface ProfileBiasRecord {
+  profileName: string;
+  acceptanceBias: number; // gebunden auf [-BIAS_BOUND, BIAS_BOUND]
+  recentReactions: { direction: 'up' | 'down'; at: string }[]; // rollierendes Fenster
+  lastAdjustedAt?: string;
+  lastDecayAt?: string;
+}
+
+// A7: persistierte messageId -> Feature-Route-Zuordnung (ueberlebt Neustarts).
+interface ReactionRouteRecord {
+  messageId: string;
+  channelId?: string;
+  type: string;
+  profileName?: string;
+  listingId?: string;
+  createdAt: string;
+}
+
+const BIAS_STEP = 0.05;
+const BIAS_BOUND = 0.15;
+const REACTION_WINDOW = 5;
+const REACTION_THRESHOLD = 3;
+const BIAS_DECAY_PER_DAY = 0.98;
+const BIAS_ZERO_EPSILON = 0.005;
+
+export interface AcceptanceAdjustment {
+  adjusted: boolean;
+  profileName: string;
+  previousBias: number;
+  bias: number;
+}
+
+function clampBias(value: number): number {
+  return Math.max(-BIAS_BOUND, Math.min(BIAS_BOUND, value));
+}
+
+// Feinere Rundung als round() (2 Stellen), sonst wird der langsame Decay wegskaliert.
+function roundBias(value: number): number {
+  return Number(value.toFixed(4));
+}
+
 interface ScannerStateFile {
-  version: 3;
+  version: 4;
   updatedAt: string;
   metadata?: ScannerStateMetadata;
   seen: SeenRecord[];
   observations: ObservationRecord[];
+  profileBias?: ProfileBiasRecord[];
+  reactionRoutes?: ReactionRouteRecord[];
 }
 
 export interface ScannerStateResetResult {
@@ -212,6 +257,8 @@ export class ScannerStateStore {
   private readonly seen = new Map<string, SeenRecord>();
   private observations: ObservationRecord[] = [];
   private metadata: ScannerStateMetadata = {};
+  private readonly profileBias = new Map<string, ProfileBiasRecord>();
+  private readonly reactionRoutes = new Map<string, ReactionRouteRecord>();
   private loadPromise: Promise<void> | null = null;
   private batchActive = false;
   private batchDirty = false;
@@ -275,12 +322,121 @@ export class ScannerStateStore {
       ...this.observations.filter(observation => observation.listingId !== result.listing.id),
       this.toObservation(result, sentAt),
     ];
+    if (receipt?.messageId) {
+      // A7: Reaction-Route fuer 👍/👎-Feedback an diese Alert-Nachricht binden.
+      this.reactionRoutes.set(receipt.messageId, {
+        messageId: receipt.messageId,
+        channelId: receipt.channelId,
+        type: 'acceptance-feedback',
+        profileName: result.profile.name,
+        listingId: result.listing.id,
+        createdAt: sentAt,
+      });
+    }
     this.prune(sentAt);
 
     try {
       await this.persistOrDefer();
     } catch (error) {
       logger.warn({ error, listingId: result.listing.id }, 'Failed to persist scanner state');
+    }
+  }
+
+  getAcceptanceBias(profileName: string): number {
+    return this.profileBias.get(profileName)?.acceptanceBias ?? 0;
+  }
+
+  getReactionRoute(messageId: string): ReactionRouteRecord | undefined {
+    return this.reactionRoutes.get(messageId);
+  }
+
+  async registerReactionRoute(record: Omit<ReactionRouteRecord, 'createdAt'>): Promise<void> {
+    this.reactionRoutes.set(record.messageId, { ...record, createdAt: new Date().toISOString() });
+    try {
+      await this.persistOrDefer();
+    } catch (error) {
+      logger.warn({ error, messageId: record.messageId }, 'Failed to persist reaction route');
+    }
+  }
+
+  // B5: fuegt eine Reaction ins rollierende Fenster ein; bei 3 von 5 gleichgerichteten
+  // Reactions wird der Bias um einen Schritt verschoben (geclampt) und das Fenster geleert.
+  async recordAcceptanceReaction(profileName: string, direction: 'up' | 'down'): Promise<AcceptanceAdjustment> {
+    const now = new Date().toISOString();
+    const record = this.profileBias.get(profileName)
+      ?? { profileName, acceptanceBias: 0, recentReactions: [] };
+    record.recentReactions = [...record.recentReactions, { direction, at: now }].slice(-REACTION_WINDOW);
+    const previousBias = record.acceptanceBias;
+
+    const sameDirection = record.recentReactions.filter(entry => entry.direction === direction).length;
+    if (sameDirection >= REACTION_THRESHOLD) {
+      record.acceptanceBias = clampBias(roundBias(record.acceptanceBias + (direction === 'up' ? BIAS_STEP : -BIAS_STEP)));
+      record.lastAdjustedAt = now;
+      record.lastDecayAt = now;
+      record.recentReactions = []; // verhindert sofortiges erneutes Ausloesen
+    }
+
+    this.profileBias.set(profileName, record);
+    try {
+      await this.persistOrDefer();
+    } catch (error) {
+      logger.warn({ error, profileName }, 'Failed to persist acceptance reaction');
+    }
+
+    return { adjusted: record.acceptanceBias !== previousBias, profileName, previousBias, bias: record.acceptanceBias };
+  }
+
+  async resetAcceptanceBias(profileName: string): Promise<AcceptanceAdjustment> {
+    const record = this.profileBias.get(profileName);
+    const previousBias = record?.acceptanceBias ?? 0;
+    if (record) {
+      const now = new Date().toISOString();
+      record.acceptanceBias = 0;
+      record.recentReactions = [];
+      record.lastAdjustedAt = now;
+      record.lastDecayAt = now;
+    }
+
+    try {
+      await this.persistOrDefer();
+    } catch (error) {
+      logger.warn({ error, profileName }, 'Failed to persist acceptance bias reset');
+    }
+
+    return { adjusted: previousBias !== 0, profileName, previousBias, bias: 0 };
+  }
+
+  // Exponentieller Zeit-Decay Richtung 0 (kein Kalender-Overhead, ein Multiplikator).
+  async applyBiasDecay(now = Date.now()): Promise<void> {
+    let changed = false;
+    for (const record of this.profileBias.values()) {
+      if (record.acceptanceBias === 0) {
+        continue;
+      }
+
+      const last = record.lastDecayAt ?? record.lastAdjustedAt;
+      if (!last) {
+        record.lastDecayAt = new Date(now).toISOString();
+        continue;
+      }
+
+      const days = (now - new Date(last).getTime()) / (24 * 60 * 60 * 1000);
+      if (days <= 0) {
+        continue;
+      }
+
+      const decayed = roundBias(record.acceptanceBias * BIAS_DECAY_PER_DAY ** days);
+      record.acceptanceBias = Math.abs(decayed) < BIAS_ZERO_EPSILON ? 0 : decayed;
+      record.lastDecayAt = new Date(now).toISOString();
+      changed = true;
+    }
+
+    if (changed) {
+      try {
+        await this.persistOrDefer();
+      } catch (error) {
+        logger.warn({ error }, 'Failed to persist bias decay');
+      }
     }
   }
 
@@ -334,6 +490,8 @@ export class ScannerStateStore {
     this.seen.clear();
     this.observations = [];
     this.metadata = {};
+    this.profileBias.clear();
+    this.reactionRoutes.clear();
 
     try {
       await this.persistOrDefer();
@@ -562,6 +720,23 @@ export class ScannerStateStore {
           typeof entry.score === 'number' &&
           (entry.health === 'WORKING' || entry.health === 'DEFECT'),
         ));
+      // Migration v3 -> v4: fehlende Felder werden zu leeren Maps (kein Schema-Break).
+      for (const entry of parsed.profileBias ?? []) {
+        if (entry?.profileName && typeof entry.acceptanceBias === 'number') {
+          this.profileBias.set(entry.profileName, {
+            profileName: entry.profileName,
+            acceptanceBias: clampBias(entry.acceptanceBias),
+            recentReactions: Array.isArray(entry.recentReactions) ? entry.recentReactions : [],
+            lastAdjustedAt: entry.lastAdjustedAt,
+            lastDecayAt: entry.lastDecayAt,
+          });
+        }
+      }
+      for (const entry of parsed.reactionRoutes ?? []) {
+        if (entry?.messageId && entry?.type && entry?.createdAt) {
+          this.reactionRoutes.set(entry.messageId, entry);
+        }
+      }
       this.prune();
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
@@ -591,6 +766,12 @@ export class ScannerStateStore {
 
     this.observations = this.observations.filter(observation =>
       new Date(observation.observedAt).getTime() >= observationCutoff);
+
+    for (const [messageId, route] of this.reactionRoutes.entries()) {
+      if (new Date(route.createdAt).getTime() < seenCutoff) {
+        this.reactionRoutes.delete(messageId);
+      }
+    }
   }
 
   private toObservation(result: EvaluatedListing, observedAt: string): ObservationRecord {
@@ -634,15 +815,14 @@ export class ScannerStateStore {
 
   private async persist(): Promise<void> {
     const statePath = getStatePath();
-    const tmpPath = `${statePath}.tmp`;
-    await fs.mkdir(path.dirname(statePath), { recursive: true });
-    await fs.writeFile(tmpPath, JSON.stringify({
-      version: 3,
+    await writeFileAtomic(statePath, JSON.stringify({
+      version: 4,
       updatedAt: new Date().toISOString(),
       metadata: this.metadata,
       seen: Array.from(this.seen.values()).sort((left, right) => left.sentAt.localeCompare(right.sentAt)),
       observations: this.observations.sort((left, right) => left.observedAt.localeCompare(right.observedAt)),
-    } satisfies ScannerStateFile, null, 2));
-    await fs.rename(tmpPath, statePath);
+      profileBias: Array.from(this.profileBias.values()).sort((left, right) => left.profileName.localeCompare(right.profileName)),
+      reactionRoutes: Array.from(this.reactionRoutes.values()).sort((left, right) => left.createdAt.localeCompare(right.createdAt)),
+    } satisfies ScannerStateFile, null, 2), env.SCANNER_STATE_BACKUP_COUNT);
   }
 }

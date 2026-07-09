@@ -9,8 +9,9 @@ import type { Notifier } from '../../../app/shared/notifier/index.js';
 import type { EbayListing } from '../domain/models.js';
 import { logger } from '../../../app/shared/logger.js';
 import { env } from '../../../app/env/index.js';
-import { ScannerStateStore, type ScannerStateResetResult } from '../domain/scannerState.js';
+import { ScannerStateStore, type ScannerStateResetResult, type AcceptanceAdjustment } from '../domain/scannerState.js';
 import type { MarketDashboardSnapshot, MarketDigestMessage } from '../domain/models.js';
+import type { ReactionRoute } from '../../../app/shared/botBindings.js';
 
 function isNewerThanCutoff(listing: EbayListing, cutoff: string | undefined): boolean {
   if (!cutoff || !listing.itemOriginDate) return true;
@@ -145,6 +146,40 @@ export class ScannerService {
     };
   }
 
+  async getReactionRoute(messageId: string): Promise<ReactionRoute | null> {
+    await this.ensureInitialized();
+    const route = this.state.getReactionRoute(messageId);
+    if (!route) {
+      return null;
+    }
+
+    return { type: route.type, profileName: route.profileName, listingId: route.listingId };
+  }
+
+  async registerReactionRoute(
+    messageId: string,
+    route: ReactionRoute & { channelId?: string },
+  ): Promise<void> {
+    await this.ensureInitialized();
+    await this.state.registerReactionRoute({
+      messageId,
+      channelId: route.channelId,
+      type: route.type,
+      profileName: route.profileName,
+      listingId: route.listingId,
+    });
+  }
+
+  async applyAcceptanceReaction(profileName: string, direction: 'up' | 'down'): Promise<AcceptanceAdjustment> {
+    await this.ensureInitialized();
+    return this.state.recordAcceptanceReaction(profileName, direction);
+  }
+
+  async resetAcceptanceBias(profileName: string): Promise<AcceptanceAdjustment> {
+    await this.ensureInitialized();
+    return this.state.resetAcceptanceBias(profileName);
+  }
+
   async resetState(profiles?: GpuProfile[]): Promise<ScannerStateResetResult> {
     await this.ensureInitialized();
 
@@ -207,6 +242,10 @@ export class ScannerService {
     this.isRunning = true;
     const runPromise = (async () => {
       await this.ensureInitialized();
+      // B5: Bias-Decay einmal pro Tick vor der Bewertung anwenden.
+      if (env.ADAPTIVE_THRESHOLD_ENABLED) {
+        await this.state.applyBiasDecay();
+      }
       const collectedListings = new Map<string, EbayListing>();
       let acceptedListings = 0;
       let seenSkipped = 0;
@@ -303,7 +342,13 @@ export class ScannerService {
         const match = selectProfileForListing(profiles, listing);
         if (!match) continue;
 
-        const result = evaluateListing(match.profile, listing, { evaluationMode });
+        const acceptanceBias = env.ADAPTIVE_THRESHOLD_ENABLED
+          ? this.state.getAcceptanceBias(match.profile.name)
+          : 0;
+        const result = evaluateListing(match.profile, listing, {
+          evaluationMode,
+          effectiveLimitMultiplier: 1 + acceptanceBias,
+        });
         if (!result.accepted) continue;
         acceptedListings += 1;
         const shouldSkipBecauseAlreadyPosted = options.ignoreSeen

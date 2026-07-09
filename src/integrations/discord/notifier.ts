@@ -12,6 +12,7 @@ import {
   GatewayIntentBits,
   ModalBuilder,
   MessageFlags,
+  Partials,
   PermissionFlagsBits,
   SlashCommandBuilder,
   type SlashCommandOptionsOnlyBuilder,
@@ -24,6 +25,8 @@ import {
   type Message,
   type MessageReaction,
   type ModalSubmitInteraction,
+  type PartialMessageReaction,
+  type PartialUser,
   type User,
 } from 'discord.js';
 import type {
@@ -34,7 +37,7 @@ import type {
   ValorantSourceEventStatus,
   ValorantTournamentScope,
 } from '../../domains/valorant/domain/models.js';
-import { env } from '../../app/env/index.js';
+import { env, allowedAdminIds, allowedReactorIds } from '../../app/env/index.js';
 import type {
   AlertMessage,
   Notifier,
@@ -46,6 +49,8 @@ import type {
 import type { MarketDigestMessage } from '../../domains/gpu/domain/models.js';
 import type { BotCommandBindings, ScanCommandResult } from '../../app/shared/botBindings.js';
 import { logger } from '../../app/shared/logger.js';
+import { counters } from '../../app/shared/telemetry.js';
+import { ReactionRouter, type ReactionEvent } from './reactionRouter.js';
 import { DiscordAdminStateStore, type ReminderRecord, type WarningRecord } from './adminState.js';
 import { formatGuildConfigSummary, parseReminderDuration, renderWelcomeTemplate } from './adminUtils.js';
 
@@ -83,10 +88,17 @@ const POLL_EMOJIS = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6�
 const GPU_ALERT_HISTORY_PAGE_SIZE = 100;
 const GPU_ALERT_HISTORY_MAX_PAGES = 10;
 const DELETE_COMMAND_MAX_MESSAGES = 1000;
-const DISCORD_ADMIN_USER_IDS = new Set([
-  '504707482547912714',
-  '689513442867937321',
-]);
+// A7: von hartcodiert auf env-basiert umgestellt (ALLOWED_ADMIN_IDS).
+const DISCORD_ADMIN_USER_IDS = allowedAdminIds;
+const ACCEPTANCE_UP_EMOJI = '👍';
+const ACCEPTANCE_DOWN_EMOJI = '👎';
+const ACCEPTANCE_RESET_EMOJI = '↩️';
+
+function formatSignedPercent(bias: number): string {
+  const percent = bias * 100;
+  const sign = percent > 0 ? '+' : '';
+  return `${sign}${percent.toFixed(1)} %`;
+}
 
 export type DiscordNotifierOptions = BotCommandBindings;
 
@@ -678,13 +690,17 @@ export class DiscordNotifier implements Notifier {
       GatewayIntentBits.GuildMembers,
       GatewayIntentBits.GuildMessages,
       GatewayIntentBits.MessageContent,
+      GatewayIntentBits.GuildMessageReactions,
     ],
+    // Reactions auf Nachrichten vor dem letzten Neustart kommen als "partial".
+    partials: [Partials.Message, Partials.Reaction],
     presence: {
       activities: [{ name: DISCORD_ACTIVITY_NAME, type: ActivityType.Watching }],
       status: 'online',
     },
   });
   private readonly adminState = new DiscordAdminStateStore();
+  private readonly reactionRouter = new ReactionRouter();
 
   private nextSendAt = 0;
   private readyPromise: Promise<void> | null = null;
@@ -735,6 +751,53 @@ export class DiscordNotifier implements Notifier {
         logger.error({ error, guildId: member.guild.id, memberId: member.id }, 'Failed to handle guild member add');
       });
     });
+
+    if (env.REACTIONS_ENABLED) {
+      this.registerReactionHandlers();
+      this.client.on(Events.MessageReactionAdd, (reaction, user) => {
+        void this.handleReactionAdd(reaction, user).catch(error => {
+          logger.error({ error, messageId: reaction.message.id }, 'Failed to handle reaction');
+        });
+      });
+    }
+  }
+
+  private registerReactionHandlers(): void {
+    // B5: 👍/👎 auf normale Alerts verschieben den Akzeptanz-Bias.
+    this.reactionRouter.register('acceptance-feedback', async event => {
+      const direction = event.emoji === ACCEPTANCE_UP_EMOJI
+        ? 'up'
+        : event.emoji === ACCEPTANCE_DOWN_EMOJI
+          ? 'down'
+          : null;
+      if (!direction || !event.route.profileName || !this.options.onAcceptanceFeedback) {
+        return;
+      }
+
+      const result = await this.options.onAcceptanceFeedback({ profileName: event.route.profileName, direction });
+      if (!result?.adjusted) {
+        return;
+      }
+
+      await this.postBiasAdjustment(event, result.profileName, result.previousBias, result.bias);
+    });
+
+    // B5: ↩️ auf die Info-Nachricht setzt den Bias des Profils zurueck.
+    this.reactionRouter.register('acceptance-reset', async event => {
+      if (event.emoji !== ACCEPTANCE_RESET_EMOJI || !event.route.profileName || !this.options.onAcceptanceReset) {
+        return;
+      }
+
+      const result = await this.options.onAcceptanceReset(event.route.profileName);
+      if (!result.adjusted) {
+        return;
+      }
+
+      await event.reaction.message.reply({
+        content: `↩️ Akzeptanz-Bias für **${event.route.profileName}** auf 0 % zurückgesetzt.`,
+        allowedMentions: { parse: [] },
+      }).catch(error => logger.warn({ error }, 'failed to confirm bias reset'));
+    });
   }
 
   async start(): Promise<void> {
@@ -765,7 +828,76 @@ export class DiscordNotifier implements Notifier {
   private async waitForSendWindow(): Promise<void> {
     const waitMs = this.nextSendAt - Date.now();
     if (waitMs > 0) {
+      counters.discordSendThrottleWaits.add(1);
       await new Promise(resolve => setTimeout(resolve, waitMs));
+    }
+  }
+
+  private async handleReactionAdd(
+    reaction: MessageReaction | PartialMessageReaction,
+    user: User | PartialUser,
+  ): Promise<void> {
+    if (user.bot) {
+      return;
+    }
+    // Kernanforderung: nur Allowlist-User, alle anderen stillschweigend ignorieren.
+    if (!allowedReactorIds.has(user.id)) {
+      return;
+    }
+    if (!this.options.onReactionRouteRequested) {
+      return;
+    }
+
+    if (reaction.partial) {
+      try {
+        await reaction.fetch();
+      } catch (error) {
+        logger.warn({ error }, 'failed to fetch partial reaction');
+        return;
+      }
+    }
+
+    const messageId = reaction.message.id;
+    const route = await this.options.onReactionRouteRequested(messageId);
+    if (!route) {
+      return;
+    }
+
+    await this.reactionRouter.handle({
+      emoji: reaction.emoji.name ?? '',
+      userId: user.id,
+      messageId,
+      channelId: reaction.message.channelId,
+      route,
+      reaction: reaction as MessageReaction,
+    });
+  }
+
+  private async postBiasAdjustment(
+    event: ReactionEvent,
+    profileName: string,
+    previousBias: number,
+    bias: number,
+  ): Promise<void> {
+    const info = await event.reaction.message.reply({
+      content: `⚖️ **${profileName}**: Akzeptanz-Schwelle ${formatSignedPercent(previousBias)} → ${formatSignedPercent(bias)}`
+        + ` (wirkt ab dem nächsten Scan). ${ACCEPTANCE_RESET_EMOJI} zum Zurücksetzen.`,
+      allowedMentions: { parse: [] },
+    }).catch(error => {
+      logger.warn({ error, profileName }, 'failed to post bias adjustment');
+      return null;
+    });
+    if (!info) {
+      return;
+    }
+
+    await info.react(ACCEPTANCE_RESET_EMOJI).catch(error => logger.warn({ error }, 'failed to add reset reaction'));
+    if (this.options.onRegisterReactionRoute) {
+      await this.options.onRegisterReactionRoute(info.id, {
+        type: 'acceptance-reset',
+        profileName,
+        channelId: info.channelId,
+      });
     }
   }
 
@@ -782,6 +914,13 @@ export class DiscordNotifier implements Notifier {
     });
 
     this.nextSendAt = Date.now() + env.DISCORD_SEND_DELAY_MS;
+
+    if (env.REACTIONS_ENABLED) {
+      // 👍/👎 fuer B5-Feedback direkt an den Alert haengen (best effort).
+      await sentMessage.react(ACCEPTANCE_UP_EMOJI).catch(() => undefined);
+      await sentMessage.react(ACCEPTANCE_DOWN_EMOJI).catch(() => undefined);
+    }
+
     return {
       messageId: sentMessage.id,
       channelId: sentMessage.channelId,

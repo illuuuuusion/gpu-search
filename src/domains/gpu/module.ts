@@ -29,7 +29,9 @@ export class GpuModule {
 
   getNotifierBindings(): Pick<
     BotCommandBindings,
-    'onScannerStateReset' | 'onManualScanRequested' | 'onForceRescanRequested' | 'onDebugScanRequested' | 'onScanInfoRequested'
+    'onScannerStateReset' | 'onManualScanRequested' | 'onForceRescanRequested' | 'onDebugScanRequested'
+    | 'onScanInfoRequested' | 'onReactionRouteRequested' | 'onRegisterReactionRoute'
+    | 'onAcceptanceFeedback' | 'onAcceptanceReset'
   > {
     return {
       onScannerStateReset: async () => this.getScanner().resetState(this.profiles),
@@ -37,6 +39,11 @@ export class GpuModule {
       onForceRescanRequested: async (): Promise<ManualScanTriggerResult> => this.getScheduler().triggerForceRescan(),
       onDebugScanRequested: async (): Promise<ManualScanTriggerResult> => this.getScheduler().triggerDebugScan(),
       onScanInfoRequested: async () => this.getScheduler().getScanInfo(),
+      onReactionRouteRequested: async messageId => this.getScanner().getReactionRoute(messageId),
+      onRegisterReactionRoute: async (messageId, route) => this.getScanner().registerReactionRoute(messageId, route),
+      onAcceptanceFeedback: async ({ profileName, direction }) =>
+        this.getScanner().applyAcceptanceReaction(profileName, direction),
+      onAcceptanceReset: async profileName => this.getScanner().resetAcceptanceBias(profileName),
     };
   }
 

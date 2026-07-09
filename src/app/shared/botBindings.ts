@@ -13,12 +13,30 @@ export interface ScanCommandResult {
   summary: ScanStatusSummary;
 }
 
+export interface ReactionRoute {
+  type: 'acceptance-feedback' | 'acceptance-reset' | string;
+  profileName?: string;
+  listingId?: string;
+}
+
+export interface AcceptanceFeedbackResult {
+  adjusted: boolean;
+  profileName: string;
+  previousBias: number;
+  bias: number;
+}
+
 export interface BotCommandBindings {
   onScannerStateReset?: () => Promise<{ seenCount: number; observationCount: number }>;
   onManualScanRequested?: () => Promise<ScanCommandResult>;
   onForceRescanRequested?: () => Promise<ScanCommandResult>;
   onDebugScanRequested?: () => Promise<ScanCommandResult>;
   onScanInfoRequested?: () => Promise<{ nextAutomaticScanAt?: string; scanRunning: boolean }>;
+  // Reaction-Feedback (A7/B5). Persistierte messageId -> Route-Zuordnung + Bias-Anpassung.
+  onReactionRouteRequested?: (messageId: string) => Promise<ReactionRoute | null>;
+  onRegisterReactionRoute?: (messageId: string, route: ReactionRoute & { channelId?: string }) => Promise<void>;
+  onAcceptanceFeedback?: (input: { profileName: string; direction: 'up' | 'down' }) => Promise<AcceptanceFeedbackResult | null>;
+  onAcceptanceReset?: (profileName: string) => Promise<AcceptanceFeedbackResult>;
   onValorantStatusRequested?: () => Promise<{
     enabled: boolean;
     syncRunning: boolean;

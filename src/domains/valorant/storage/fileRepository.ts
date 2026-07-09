@@ -1,5 +1,6 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { env } from '../../../app/env/index.js';
+import { writeFileAtomic } from '../../../app/shared/atomicFile.js';
 import type {
   CompositionRecord,
   CompBuilderPreset,
@@ -184,8 +185,11 @@ export class FileValorantRepository {
   }
 
   async save(state: ValorantAppState): Promise<void> {
-    await mkdir(dirname(this.options.filePath), { recursive: true });
-    await writeFile(this.options.filePath, JSON.stringify(state, null, 2) + '\n', 'utf8');
+    await writeFileAtomic(
+      this.options.filePath,
+      JSON.stringify(state, null, 2) + '\n',
+      env.SCANNER_STATE_BACKUP_COUNT,
+    );
   }
 
   async getStatusSnapshot(syncRunning: boolean): Promise<ValorantStatusSnapshot> {

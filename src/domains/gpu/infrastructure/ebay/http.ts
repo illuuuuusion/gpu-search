@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { env, getEbayApiBaseUrl } from '../../../../app/env/index.js';
+import { counters } from '../../../../app/shared/telemetry.js';
 
 export const ebayHttpClient = axios.create({
   baseURL: getEbayApiBaseUrl(),
@@ -29,7 +30,14 @@ export async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
     try {
       return await fn();
     } catch (error) {
-      if (!isRetryable(error) || attempt >= env.EBAY_HTTP_MAX_RETRIES) throw error;
+      if (axios.isAxiosError(error) && error.response?.status === 429) {
+        counters.ebayRateLimitHits.add(1);
+      }
+      if (!isRetryable(error) || attempt >= env.EBAY_HTTP_MAX_RETRIES) {
+        counters.ebayHttpErrors.add(1);
+        throw error;
+      }
+      counters.ebayHttpRetries.add(1);
       await new Promise(resolve => setTimeout(resolve, getRetryDelayMs(error, attempt)));
       attempt += 1;
     }

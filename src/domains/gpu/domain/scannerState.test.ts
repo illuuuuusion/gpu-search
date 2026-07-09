@@ -159,3 +159,80 @@ test('commitBatch without beginBatch is a no-op', async () => {
   const afterCommit = await readStatePath();
   assert.equal(afterCommit, afterReset, 'file should be unchanged when commitBatch called without beginBatch');
 });
+
+async function freshStore(): Promise<ScannerStateStore> {
+  const store = new ScannerStateStore();
+  await store.load();
+  await store.reset();
+  return store;
+}
+
+test('recordAcceptanceReaction only adjusts bias at 3 of 5 same-direction reactions', async () => {
+  const store = await freshStore();
+
+  const first = await store.recordAcceptanceReaction('RTX 3090', 'down');
+  const second = await store.recordAcceptanceReaction('RTX 3090', 'down');
+  assert.equal(first.adjusted, false);
+  assert.equal(second.adjusted, false);
+  assert.equal(store.getAcceptanceBias('RTX 3090'), 0);
+
+  const third = await store.recordAcceptanceReaction('RTX 3090', 'down');
+  assert.equal(third.adjusted, true);
+  assert.equal(third.bias, -0.05);
+  assert.equal(store.getAcceptanceBias('RTX 3090'), -0.05);
+});
+
+test('acceptance bias stays within [-0.15, 0.15] under repeated feedback', async () => {
+  const store = await freshStore();
+
+  for (let step = 0; step < 10; step += 1) {
+    await store.recordAcceptanceReaction('RTX 3090', 'up');
+    await store.recordAcceptanceReaction('RTX 3090', 'up');
+    await store.recordAcceptanceReaction('RTX 3090', 'up');
+  }
+
+  assert.equal(store.getAcceptanceBias('RTX 3090'), 0.15);
+});
+
+test('resetAcceptanceBias returns the bias to zero', async () => {
+  const store = await freshStore();
+
+  await store.recordAcceptanceReaction('RTX 3090', 'up');
+  await store.recordAcceptanceReaction('RTX 3090', 'up');
+  await store.recordAcceptanceReaction('RTX 3090', 'up');
+  assert.equal(store.getAcceptanceBias('RTX 3090'), 0.05);
+
+  const result = await store.resetAcceptanceBias('RTX 3090');
+  assert.equal(result.adjusted, true);
+  assert.equal(store.getAcceptanceBias('RTX 3090'), 0);
+});
+
+test('applyBiasDecay pulls the bias toward zero over simulated time', async () => {
+  const store = await freshStore();
+
+  await store.recordAcceptanceReaction('RTX 3090', 'up');
+  await store.recordAcceptanceReaction('RTX 3090', 'up');
+  await store.recordAcceptanceReaction('RTX 3090', 'up');
+  const before = store.getAcceptanceBias('RTX 3090');
+  assert.ok(before > 0);
+
+  await store.applyBiasDecay(Date.now() + 5 * 24 * 60 * 60 * 1000);
+  const after = store.getAcceptanceBias('RTX 3090');
+  assert.ok(after < before, `expected decay: ${after} < ${before}`);
+
+  await store.applyBiasDecay(Date.now() + 400 * 24 * 60 * 60 * 1000);
+  assert.equal(store.getAcceptanceBias('RTX 3090'), 0);
+});
+
+test('reaction routes are registered on send and resolvable afterwards', async () => {
+  const store = await freshStore();
+
+  await store.recordSent(buildResult({}), { messageId: 'msg-42', channelId: 'chan-1' });
+  const route = store.getReactionRoute('msg-42');
+  assert.equal(route?.type, 'acceptance-feedback');
+  assert.equal(route?.profileName, 'RTX 3090');
+  assert.equal(route?.listingId, 'listing-1');
+
+  await store.registerReactionRoute({ messageId: 'msg-99', type: 'acceptance-reset', profileName: 'RTX 3090' });
+  assert.equal(store.getReactionRoute('msg-99')?.type, 'acceptance-reset');
+});

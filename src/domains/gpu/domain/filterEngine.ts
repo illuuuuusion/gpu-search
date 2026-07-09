@@ -161,6 +161,7 @@ function effectiveLimitForListing(
   health: ListingHealth,
   offerType: OfferType,
   evaluationMode: 'normal' | 'debug' = 'normal',
+  effectiveLimitMultiplier = 1,
 ): {
   baseLimitEur: number;
   effectiveLimitEur: number;
@@ -170,7 +171,8 @@ function effectiveLimitForListing(
     baseLimitForOfferType(offerType, profile, health) *
     (evaluationMode === 'debug' ? DEBUG_PRICE_LIMIT_MULTIPLIER : 1)
   ).toFixed(2));
-  const effectiveLimitEur = baseLimitEur;
+  // B5: begrenzter Akzeptanz-Bias verschiebt das effektive Limit (Default 1 = neutral).
+  const effectiveLimitEur = Number((baseLimitEur * effectiveLimitMultiplier).toFixed(2));
 
   return {
     baseLimitEur,
@@ -205,9 +207,10 @@ function rejectedResult(
 export function evaluateListing(
   profile: GpuProfile,
   listing: EbayListing,
-  options: { evaluationMode?: 'normal' | 'debug' } = {},
+  options: { evaluationMode?: 'normal' | 'debug'; effectiveLimitMultiplier?: number } = {},
 ): EvaluatedListing {
   const evaluationMode = options.evaluationMode ?? 'normal';
+  const effectiveLimitMultiplier = options.effectiveLimitMultiplier ?? 1;
   const reasons: string[] = [];
   const searchText = buildListingSearchText(listing);
   const searchNormalized = normalizeListingText(searchText);
@@ -287,6 +290,7 @@ export function evaluateListing(
     healthResult.health,
     offerType,
     evaluationMode,
+    effectiveLimitMultiplier,
   );
   const accepted = acceptedForOfferType(offerType, listing, priceEvaluation.effectiveLimitEur);
   if (!accepted) reasons.push('price_above_limit_or_auction_not_soon');

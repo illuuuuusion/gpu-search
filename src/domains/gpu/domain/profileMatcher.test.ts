@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fc from 'fast-check';
 import { selectProfileForListing } from './profileMatcher.js';
 import type { EbayListing, GpuProfile } from '../domain/models.js';
 
@@ -108,4 +109,27 @@ test('selectProfileForListing skips negative aliases found outside the title', (
 
   const match = selectProfileForListing(profiles, listing);
   assert.equal(match, null);
+});
+
+test('property: an alias present in the title with no negative alias always matches', () => {
+  const aliasToken = fc.stringMatching(/^[a-z][a-z0-9]{2,10}$/);
+  fc.assert(
+    fc.property(aliasToken, fc.string(), fc.string(), (alias, prefix, suffix) => {
+      const profile = buildProfile({
+        name: `Profile ${alias}`,
+        aliases: [alias],
+        negativeAliases: [],
+        vramGb: 8,
+        category: 'test',
+        vramVariants: false,
+        excludeNew: false,
+        onlyGermany: false,
+        prices: { buyNowWorking: 100, buyNowDefect: 40, auctionWorking: 90, auctionDefect: 30 },
+      });
+      const listing = buildListing({ title: `${prefix} ${alias} ${suffix}` });
+      const match = selectProfileForListing([profile], listing);
+      assert.equal(match?.profile.name, profile.name);
+    }),
+    { numRuns: 200 },
+  );
 });

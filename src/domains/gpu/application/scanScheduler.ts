@@ -1,6 +1,7 @@
 import type { Notifier } from '../../../app/shared/notifier/index.js';
 import type { GpuProfile } from '../domain/models.js';
 import { logger } from '../../../app/shared/logger.js';
+import { withSpan } from '../../../app/shared/telemetry.js';
 import { ScannerService, type ScannerRunSummary } from './scanner.js';
 
 const DEBUG_SCAN_MAX_ALERTS = 10;
@@ -103,7 +104,7 @@ export class ScanScheduler {
           logger.warn({ error }, 'failed to send automatic scan start status');
         });
       }
-      const summary = await this.runScan({ forceRescan: false });
+      const summary = await withSpan('gpu.scan.tick', () => this.runScan({ forceRescan: false }));
       if (this.notifier?.sendScanStatus) {
         await this.notifier.sendScanStatus({
           phase: 'finished',

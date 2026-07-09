@@ -1,6 +1,8 @@
 import type { ValorantAppState, ValorantStatusSnapshot, ValorantSyncResult } from '../domain/models.js';
 import { ValorantSyncService } from '../ingest/pipeline/syncService.js';
 import { FileValorantRepository } from '../storage/fileRepository.js';
+import { logger } from '../../../app/shared/logger.js';
+import { withSpan } from '../../../app/shared/telemetry.js';
 
 interface ValorantSyncSchedulerOptions {
   ingestHourUtc: number;
@@ -40,14 +42,19 @@ export class ValorantSyncScheduler {
     }
 
     this.timer = setTimeout(() => {
-      void this.runAndReschedule('scheduled');
+      // Error-Boundary pro Tick: ein fehlgeschlagener Sync darf keine unhandled
+      // rejection erzeugen und nicht den Prozess/andere Domains mitreissen.
+      // scheduleNextRun() lief bereits im finally von runAndReschedule.
+      void this.runAndReschedule('scheduled').catch(error => {
+        logger.error({ error, trigger: 'scheduled' }, 'valorant sync tick failed');
+      });
     }, Math.max(0, nextRunAt.getTime() - Date.now()));
   }
 
   private async runAndReschedule(trigger: 'startup' | 'scheduled' | 'manual'): Promise<ValorantSyncResult> {
     if (!this.runningPromise) {
       const previousState = await this.repository.load();
-      this.runningPromise = this.syncService.runSync(trigger)
+      this.runningPromise = withSpan('valorant.sync.tick', () => this.syncService.runSync(trigger))
         .then(async result => {
           if (this.options.onSyncCompleted) {
             await this.options.onSyncCompleted(result, previousState);

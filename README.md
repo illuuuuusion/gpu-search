@@ -77,6 +77,18 @@ src/
   TEST_PROFILE_NAME="RTX 5080" npm run test:mock-scan
   ```
 
+## Observability (optional)
+
+Mit `OTEL_ENABLED=true` startet ein lokaler Prometheus-Endpunkt (Default-Port
+`9464`). Metriken (u. a. `ebay_http_retries_total`, `ebay_http_rate_limit_hits_total`,
+`ebay_http_errors_total`, `discord_send_throttle_waits_total`) sowie Spans für
+GPU-Scan- und Valorant-Sync-Ticks lassen sich so scrapen:
+
+```bash
+OTEL_ENABLED=true npm start
+curl localhost:9464/metrics
+```
+
 ## Was schon implementiert ist
 
 - OAuth für eBay

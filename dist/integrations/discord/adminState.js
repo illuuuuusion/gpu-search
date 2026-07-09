@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { env } from '../../app/env/index.js';
+import { writeFileAtomic } from '../../app/shared/atomicFile.js';
 const DEFAULT_ADMIN_STATE_PATH = path.resolve(process.cwd(), 'data/discord-admin-state.json');
 function getStatePath() {
     return env.DISCORD_ADMIN_STATE_PATH ?? DEFAULT_ADMIN_STATE_PATH;
@@ -140,8 +141,6 @@ export class DiscordAdminStateStore {
     }
     async persist() {
         this.state.updatedAt = new Date().toISOString();
-        const statePath = getStatePath();
-        await fs.mkdir(path.dirname(statePath), { recursive: true });
-        await fs.writeFile(statePath, JSON.stringify(this.state, null, 2));
+        await writeFileAtomic(getStatePath(), JSON.stringify(this.state, null, 2), env.SCANNER_STATE_BACKUP_COUNT);
     }
 }
