@@ -56,8 +56,39 @@ mit `DISCORD_BOT_TOKEN` oder `DISCORD_TOKEN`, beendet er sich mit Exit-Code 1.
 Der Sidecar kann `health` über den Socket abfragen. Antwort:
 
 ```json
-{ "discordReady": true, "sidecarConnected": true, "registeredTools": [], "openContexts": 0 }
+{
+  "discordReady": true,
+  "sidecarConnected": true,
+  "registeredTools": ["get_guild_info", "list_channels", "..."],
+  "openContexts": 0
+}
 ```
+
+`list_tools` liefert denselben Katalog mit Risikoklasse, Freigabepflicht und
+Argumentnamen. Der Sidecar bietet Claude genau diese Werkzeuge an.
+
+## Discord-Rechte für die Read-Tools
+
+Der Bot bekommt im Developer Portal nur die Rechte, die die registrierten Werkzeuge
+wirklich brauchen. **Keine `Administrator`-Berechtigung.**
+
+| Recht | Wofür |
+|---|---|
+| View Channels | `list_channels`, `view_channel_permissions`, `get_messages` |
+| Read Message History | `get_messages` |
+| View Audit Log | `get_audit_log` |
+| Manage Webhooks | `list_webhooks` |
+| Manage Server | `list_invites`, `list_automod_rules` |
+| Ban Members | `list_bans` |
+
+Achtung bei den letzten drei: `Manage Webhooks`, `Manage Server` und `Ban Members` sind
+**schreibfähige** Discord-Rechte. Der Prozess nutzt sie in Phase 2 nur lesend — die
+Tool-Policy lässt nichts anderes zu —, aber das Token könnte bei Kompromittierung mehr.
+Wer das nicht will, verzichtet auf `list_bans`, `list_invites`, `list_webhooks` und
+`list_automod_rules` und vergibt die drei Rechte nicht.
+
+Das privilegierte Gateway-Intent `GUILD_MEMBERS` ist bereits aktiv (der Bot nutzt es für
+Welcome-Nachrichten) und wird von `list_members`/`get_member` mitverwendet.
 
 ## Neustart und Recovery
 

@@ -8,6 +8,10 @@ Lokaler Claude-Code-Channel-Sidecar für `gpu-search`.
 - Er spricht über einen **Unix-Domain-Socket** mit dem `gpu-search`-Hauptprozess.
 - Er reicht ausschließlich Toolname, fachliche Argumente und die vom Hauptprozess
   ausgestellte `requestId` weiter.
+- Den Katalog der Admin-Werkzeuge holt er beim Verbinden per `list_tools` vom
+  Hauptprozess und bietet Claude genau diese an — je Werkzeug unter eigenem Namen,
+  damit die Permissions in `.claude/settings.json` pro Tool greifen. Eine eigene
+  Toolliste führt er bewusst nicht.
 
 ## Was dieser Prozess ausdrücklich nicht ist
 

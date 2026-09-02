@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
+import { z } from 'zod';
 import type { DiscordRuntime } from '../runtime/discordRuntime.js';
 import { AdminToolExecutor, type ToolHandlerInput } from './adminToolExecutor.js';
 import { ApprovalService } from './approvalService.js';
@@ -37,7 +38,7 @@ test('read tools run without approval and get the configured guild id', async ()
 
   const result = await executor.execute({
     toolName: 'list_roles',
-    args: { guildId: 'attacker-guild', userId: 'attacker', limit: 5 },
+    args: { guildId: 'guild-config', actorUserId: 'attacker', limit: 5 },
     requestId: context.requestId,
   });
 
@@ -45,6 +46,63 @@ test('read tools run without approval and get the configured guild id', async ()
   assert.equal(seen[0].guildId, 'guild-config');
   assert.deepEqual(seen[0].args, { limit: 5 }, 'identity arguments must be stripped');
   assert.equal(seen[0].context.userId, 'user-1');
+});
+
+test('a foreign guild id is rejected instead of silently ignored', async () => {
+  const { executor, context } = await build();
+  let called = false;
+  executor.register('list_roles', async () => {
+    called = true;
+    return [];
+  });
+
+  for (const key of ['guildId', 'guild_id']) {
+    const result = await executor.execute({
+      toolName: 'list_roles',
+      args: { [key]: 'attacker-guild' },
+      requestId: context.requestId,
+    });
+    assert.deepEqual(result, { status: 'denied', reason: `guild id is fixed by configuration: ${key}` });
+  }
+  assert.equal(called, false);
+});
+
+test('arguments are validated against the tool schema before anything runs', async () => {
+  const { executor, context } = await build();
+  let called = false;
+  executor.register('get_messages', async () => {
+    called = true;
+    return [];
+  }, z.object({ channelId: z.string(), limit: z.number().int().max(50).optional() }).strict());
+
+  const tooMany = await executor.execute({
+    toolName: 'get_messages',
+    args: { channelId: 'c1', limit: 5000 },
+    requestId: context.requestId,
+  });
+  assert.equal(tooMany.status, 'denied');
+  assert.match((tooMany as { reason: string }).reason, /invalid arguments -- limit/);
+
+  const unknownArg = await executor.execute({
+    toolName: 'get_messages',
+    args: { channelId: 'c1', sneaky: true },
+    requestId: context.requestId,
+  });
+  assert.equal(unknownArg.status, 'denied');
+  assert.equal(called, false);
+});
+
+test('a failing handler is reported as an error, not as a success', async () => {
+  const { executor, context, auditFile } = await build();
+  executor.register('list_roles', async () => {
+    throw new Error('discord is down');
+  });
+
+  const result = await executor.execute({ toolName: 'list_roles', requestId: context.requestId });
+  assert.deepEqual(result, { status: 'error', message: 'discord is down' });
+
+  const lines = (await fs.readFile(auditFile, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+  assert.equal(lines.at(-1).event, 'tool_failed');
 });
 
 test('unknown and unregistered tools are denied', async () => {

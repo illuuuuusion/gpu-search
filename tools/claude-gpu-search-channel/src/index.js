@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import { StdioChannel } from './channel/index.js';
 import { SocketClient } from './socketClient/index.js';
-import { TOOL_DEFINITIONS, createToolHandlers } from './tools/index.js';
+import { CHANNEL_TOOLS, createAdminToolHandlers, createToolHandlers, fetchAdminTools } from './tools/index.js';
 
 // Harte Grenze: der Sidecar darf niemals Discord-Zugangsdaten sehen. Wer ihn mit
 // vererbtem Bot-Token startet, bekommt keinen halb sicheren Betrieb, sondern Exit 1.
@@ -31,11 +31,12 @@ export async function main(environment = process.env) {
     onClose: () => channel.send({ type: 'channel_status', connected: false }),
   });
 
-  const handlers = createToolHandlers(socketClient);
+  let tools = [...CHANNEL_TOOLS];
+  let handlers = createToolHandlers(socketClient);
   const channel = new StdioChannel({
     onFrame: async frame => {
       if (frame.type === 'list_tools') {
-        channel.send({ type: 'tools', id: frame.id, tools: TOOL_DEFINITIONS });
+        channel.send({ type: 'tools', id: frame.id, tools });
         return;
       }
 
@@ -54,7 +55,14 @@ export async function main(environment = process.env) {
   });
 
   await socketClient.connect();
-  channel.send({ type: 'channel_status', connected: true });
+
+  // Der Katalog der Admin-Tools kommt vom Hauptprozess: was dort nicht
+  // registriert ist, bietet der Sidecar Claude erst gar nicht an.
+  const adminTools = await fetchAdminTools(socketClient);
+  tools = [...CHANNEL_TOOLS, ...adminTools];
+  handlers = { ...handlers, ...createAdminToolHandlers(socketClient, adminTools) };
+
+  channel.send({ type: 'channel_status', connected: true, tools: tools.map(tool => tool.name) });
 
   const shutdown = () => {
     socketClient.close();

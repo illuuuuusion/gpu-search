@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { SocketClient } from '../src/socketClient/index.js';
+import { createAdminToolHandlers, fetchAdminTools } from '../src/tools/index.js';
 import { assertNoDiscordCredentials, readSecret } from '../src/index.js';
 
 const packageRoot = path.dirname(fileURLToPath(new URL('../package.json', import.meta.url)));
@@ -85,6 +86,49 @@ test('a wrong secret rejects the connection', async () => {
   const client = new SocketClient({ socketPath, secret: 'wrong' });
   await assert.rejects(client.connect(), /authentication rejected/);
   await assert.rejects(client.request('health'), /not authenticated/);
+
+  client.close();
+  await new Promise(resolve => server.close(resolve));
+});
+
+test('admin tools are advertised per name and mapped onto admin_tool_request', async () => {
+  const socketPath = path.join(await fs.mkdtemp(path.join(os.tmpdir(), 'sidecar-sock-')), 'channel.sock');
+  const received = [];
+  const server = net.createServer(socket => {
+    socket.setEncoding('utf8');
+    socket.on('data', chunk => {
+      for (const line of chunk.split('\n').filter(Boolean)) {
+        const frame = JSON.parse(line);
+        received.push(frame);
+        if (frame.type === 'auth') {
+          socket.write(`${JSON.stringify({ type: 'auth_result', ok: true })}\n`);
+        } else if (frame.type === 'list_tools') {
+          socket.write(`${JSON.stringify({
+            type: 'result', id: frame.id, ok: true,
+            result: [{ name: 'list_roles', risk: 'read', requiresApproval: false, args: [] }],
+          })}\n`);
+        } else {
+          socket.write(`${JSON.stringify({ type: 'result', id: frame.id, ok: true, result: [] })}\n`);
+        }
+      }
+    });
+  });
+  await new Promise(resolve => server.listen(socketPath, resolve));
+
+  const client = new SocketClient({ socketPath, secret: 'right' });
+  await client.connect();
+
+  const adminTools = await fetchAdminTools(client);
+  assert.deepEqual(adminTools, [{ name: 'list_roles', description: 'read', args: ['requestId'] }]);
+
+  const handlers = createAdminToolHandlers(client, adminTools);
+  await handlers.list_roles({ requestId: 'req-1', limit: 5 });
+
+  const forwarded = received.at(-1);
+  assert.equal(forwarded.type, 'admin_tool_request');
+  assert.equal(forwarded.toolName, 'list_roles');
+  assert.equal(forwarded.requestId, 'req-1');
+  assert.deepEqual(forwarded.args, { limit: 5 }, 'requestId must not be smuggled into the tool arguments');
 
   client.close();
   await new Promise(resolve => server.close(resolve));

@@ -19,12 +19,14 @@ Pflicht, keine Härtungsoption.
 | Zugriff auf den lokalen Socket durch andere Prozesse | Unix-Socket mit Modus 0600 in `data/runtime/`, zusätzlich Secret-Handshake | `agentSocketServer.test.ts` |
 | Bot-Token gelangt zum Sidecar oder zu Claude | Sidecar bricht bei vererbtem Token ab, hat keine `discord.js`-Abhängigkeit | `tools/claude-gpu-search-channel/test/sidecar.test.js` |
 | Secrets im Audit-Trail | Schlüssel-basierte Redaction vor dem Schreiben | `auditLog.test.ts` |
+| Massen-Auslesen über Read-Tools | Harte Limits im Zod-Schema, `.strict()` gegen geschmuggelte Argumente | `readTools.test.ts` |
+| Webhook-Token oder Invite-Code wird exfiltriert | Projektionen geben `token`/`url` nie heraus, Invite-Codes nur gekürzt | `readTools.test.ts` |
+| Ein Read-Tool verändert doch Zustand | Alle registrierten Tools sind Klasse `read`; Test prüft die Registrierung vollständig | `readTools.test.ts` |
 | Fehlkonfigurierter Start (aktive KI ohne Allowlist) | `validateAiAgentConfig()` wirft beim Laden von `env` | `src/app/env/index.test.ts` |
 | Ausfall von Claude/Sidecar legt den Bot lahm | KI-Start ist fehlerisoliert; ohne Sidecar antwortet der Bot mit „KI-Funktion derzeit nicht verfügbar“ statt zu puffern | manuell, `bootstrap.ts` |
 
-## Offene Risiken (Phase 2+)
+## Offene Risiken (Phase 3+)
 
-- Exfiltration über Read-Tools mit zu großen Limits → harte Limits in Phase 2.
 - Rollenhierarchie und geschützte Ziele (`@everyone`, Managed Roles, Bot-Rolle) werden
   erst mit den Write-Tools in Phase 3 durchgesetzt; `AI_PROTECTED_ROLE_IDS` und
   `AI_PROTECTED_CHANNEL_IDS` sind dafür bereits konfigurierbar.

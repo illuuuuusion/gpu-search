@@ -155,9 +155,10 @@ curl localhost:9464/metrics
 - **Persistenz ist JSON, kein DBMS.** Die Write-Serialisierung ist prozesslokal —
   der Betrieb ist auf einen einzelnen `gpu-search`-Prozess pro State-Datei ausgelegt.
 - `B2` (Deal-Timing) wird erst mit genügend eigener Laufzeit-Historie aussagekräftig.
-- **Der KI-Agent ist erst als Gerüst vorhanden** (`AI_AGENT_ENABLED=false`). Policy,
-  Freigaben, Audit, Allowlists und der lokale Socket stehen; es ist aber noch **kein
-  Admin-Tool registriert**. Details in [`docs/ai-agent/`](docs/ai-agent/architecture.md).
+- **Der KI-Agent kann bisher nur lesen** (`AI_AGENT_ENABLED=false` als Default).
+  Policy, Freigaben, Audit, Allowlists, Socket und 14 begrenzte Read-Tools stehen;
+  schreibende und destruktive Werkzeuge sind **nicht registrierbar**.
+  Details in [`docs/ai-agent/`](docs/ai-agent/architecture.md).
 
 ## Was ich als Nächstes ergänzen würde
 

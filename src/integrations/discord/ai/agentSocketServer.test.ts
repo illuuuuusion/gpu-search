@@ -49,6 +49,7 @@ function handlers(calls: string[]): AgentSocketHandlers {
     editMessage: async () => undefined,
     adminTool: async input => ({ status: 'denied', reason: `no tools yet: ${input.toolName}` }),
     health: async () => ({ ok: true }),
+    listTools: async () => [{ name: 'list_roles', risk: 'read', requiresApproval: false, args: [] }],
   };
 }
 

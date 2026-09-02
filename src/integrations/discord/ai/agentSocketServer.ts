@@ -18,6 +18,7 @@ export interface AgentSocketHandlers {
     approvalId?: string;
   }): Promise<unknown>;
   health(): Promise<Record<string, unknown>>;
+  listTools(): Promise<unknown>;
 }
 
 export interface AgentSocketServerOptions {
@@ -202,6 +203,9 @@ export class AgentSocketServer {
           return;
         case 'health':
           respond({ ok: true, result: await handlers.health() });
+          return;
+        case 'list_tools':
+          respond({ ok: true, result: await handlers.listTools() });
           return;
         default:
           respond({ ok: false, error: `unknown frame type: ${String(frame.type)}` });

@@ -6,6 +6,7 @@ import { AdminToolExecutor } from './adminToolExecutor.js';
 import { AgentSocketServer } from './agentSocketServer.js';
 import { ApprovalService } from './approvalService.js';
 import { AuditLog } from './auditLog.js';
+import { registerReadTools } from './readTools.js';
 import { RequestContextStore, type RequestContext } from './requestContextStore.js';
 
 const UNAVAILABLE_NOTICE = 'KI-Funktion derzeit nicht verfügbar.';
@@ -38,6 +39,8 @@ export class AiAgentModule {
       guildId: config.guildId,
       destructiveToolsEnabled: config.destructiveToolsEnabled,
     });
+    // Phase 2: ausschliesslich lesende Werkzeuge. Writes folgen in Phase 3.
+    registerReadTools(this.executor);
 
     this.socketServer = new AgentSocketServer({
       socketPath: config.socketPath,
@@ -47,6 +50,7 @@ export class AiAgentModule {
         react: input => this.react(input),
         editMessage: input => this.editMessage(input),
         adminTool: input => this.executor.execute(input),
+        listTools: async () => this.executor.toolCatalog,
         health: async () => ({
           discordReady: this.runtime.client.isReady(),
           sidecarConnected: this.socketServer.connected,
