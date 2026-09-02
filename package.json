@@ -6,19 +6,23 @@
     "node": ">=22 <23"
   },
   "description": "GPU watchlist scanner with eBay search, filtering, scoring and Discord notifications",
+  "workspaces": [
+    "tools/claude-gpu-search-channel"
+  ],
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/app/bootstrap.ts",
     "clean": "tsx src/scripts/ops/cleanDist.ts",
     "build": "npm run clean && tsc -p tsconfig.json",
     "start": "node dist/app/bootstrap.js",
-    "test": "EBAY_PROVIDER=mock EBAY_HTTP_RETRY_DELAY_MS=1 SCANNER_STATE_PATH=/tmp/gpu-search-test-scanner-state.json MARKET_SUMMARY_PATH=/tmp/gpu-search-test-market-summary.json npm run build && EBAY_PROVIDER=mock EBAY_HTTP_RETRY_DELAY_MS=1 SCANNER_STATE_PATH=/tmp/gpu-search-test-scanner-state.json MARKET_SUMMARY_PATH=/tmp/gpu-search-test-market-summary.json sh -c 'node --test $(find dist -name \"*.test.js\")'",
+    "test": "EBAY_PROVIDER=mock EBAY_HTTP_RETRY_DELAY_MS=1 SCANNER_STATE_PATH=/tmp/gpu-search-test-scanner-state.json MARKET_SUMMARY_PATH=/tmp/gpu-search-test-market-summary.json npm run build && EBAY_PROVIDER=mock EBAY_HTTP_RETRY_DELAY_MS=1 SCANNER_STATE_PATH=/tmp/gpu-search-test-scanner-state.json MARKET_SUMMARY_PATH=/tmp/gpu-search-test-market-summary.json sh -c 'node --test $(find dist -name \"*.test.js\")' && npm run test:sidecar",
     "doctor": "tsx src/scripts/ops/doctor.ts",
     "reset:scanner-state": "node dist/scripts/gpu/resetScannerState.js",
     "test:mock-scan": "npm run build && node dist/scripts/gpu/testMockScan.js",
     "valorant:sync": "node dist/scripts/valorant/valorantSync.js",
     "valorant:fixture-check": "node dist/scripts/valorant/valorantFixtureCheck.js",
-    "lint": "tsc --noEmit -p tsconfig.json"
+    "lint": "tsc --noEmit -p tsconfig.json",
+    "test:sidecar": "npm test --workspace claude-gpu-search-channel"
   },
   "dependencies": {
     "@opentelemetry/api": "^1.9.1",

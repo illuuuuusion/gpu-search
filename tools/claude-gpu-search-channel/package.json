@@ -1,0 +1,16 @@
+{
+  "name": "claude-gpu-search-channel",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Claude Code channel sidecar for gpu-search. Speaks the channel protocol over stdio and talks to gpu-search over a local unix socket. Has no Discord credentials and opens no network port.",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=22 <23"
+  },
+  "dependencies": {}
+}

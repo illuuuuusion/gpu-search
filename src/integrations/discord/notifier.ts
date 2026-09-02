@@ -1,7 +1,5 @@
-import { once } from 'node:events';
 import {
   ActionRowBuilder,
-  ActivityType,
   ButtonBuilder,
   ButtonStyle,
   Client,
@@ -9,10 +7,8 @@ import {
   DiscordAPIError,
   EmbedBuilder,
   Events,
-  GatewayIntentBits,
   ModalBuilder,
   MessageFlags,
-  Partials,
   PermissionFlagsBits,
   SlashCommandBuilder,
   type SlashCommandOptionsOnlyBuilder,
@@ -50,11 +46,11 @@ import type { AuctionReminderFired, AuctionReminderInfo, MarketDigestMessage } f
 import type { BotCommandBindings, ScanCommandResult } from '../../app/shared/botBindings.js';
 import { logger } from '../../app/shared/logger.js';
 import { counters } from '../../app/shared/telemetry.js';
-import { ReactionRouter, type ReactionEvent } from './reactionRouter.js';
+import { ReactionRouter, type ReactionEvent } from './routing/reactionRouter.js';
+import { DiscordRuntime } from './runtime/discordRuntime.js';
 import { DiscordAdminStateStore, type ReminderRecord, type WarningRecord } from './adminState.js';
 import { formatGuildConfigSummary, parseReminderDuration, renderWelcomeTemplate } from './adminUtils.js';
 
-const DISCORD_ACTIVITY_NAME = 'eBay GPU-Deals';
 const SCANNER_STATE_RESET_COMMAND = 'scanner-state-reset';
 const SCAN_NOW_COMMAND = 'scan-now';
 const FORCE_RESCAN_COMMAND = 'force-rescan';
@@ -691,21 +687,7 @@ function isAlreadyAcknowledgedInteractionError(error: unknown): boolean {
 }
 
 export class DiscordNotifier implements Notifier {
-  private readonly client = new Client({
-    intents: [
-      GatewayIntentBits.Guilds,
-      GatewayIntentBits.GuildMembers,
-      GatewayIntentBits.GuildMessages,
-      GatewayIntentBits.MessageContent,
-      GatewayIntentBits.GuildMessageReactions,
-    ],
-    // Reactions auf Nachrichten vor dem letzten Neustart kommen als "partial".
-    partials: [Partials.Message, Partials.Reaction],
-    presence: {
-      activities: [{ name: DISCORD_ACTIVITY_NAME, type: ActivityType.Watching }],
-      status: 'online',
-    },
-  });
+  private readonly client: Client;
   private readonly adminState = new DiscordAdminStateStore();
   private readonly reactionRouter = new ReactionRouter();
 
@@ -716,13 +698,20 @@ export class DiscordNotifier implements Notifier {
   private reminderTimer: NodeJS.Timeout | null = null;
   private readonly messageWindows = new Map<string, number[]>();
 
-  constructor(private readonly options: DiscordNotifierOptions = {}) {
+  constructor(
+    private readonly options: DiscordNotifierOptions = {},
+    private readonly runtime: DiscordRuntime = new DiscordRuntime(),
+  ) {
     if (!env.DISCORD_BOT_TOKEN || !env.DISCORD_CHANNEL_ID) {
       throw new Error('Missing Discord configuration');
     }
 
-    this.client.on(Events.InteractionCreate, interaction => {
-      void this.handleInteraction(interaction).catch(error => {
+    // Kein eigener Client: der Notifier arbeitet auf dem einzigen Gateway-Client
+    // der Runtime, genau wie spaeter der KI-Router und die Admin-Tools.
+    this.client = runtime.client;
+
+    runtime.router.registerInteractionHandler('notifier', async interaction => {
+      await this.handleInteraction(interaction).catch(error => {
         if (isUnknownInteractionError(error)) {
           logger.warn({
             commandName: interaction.isChatInputCommand() ? interaction.commandName : interaction.isMessageComponent() ? interaction.customId : undefined,
@@ -747,11 +736,9 @@ export class DiscordNotifier implements Notifier {
       });
     });
 
-    this.client.on(Events.MessageCreate, message => {
-      void this.handleMessageCreate(message).catch(error => {
-        logger.error({ error, messageId: message.id }, 'Failed to handle Discord message');
-      });
-    });
+    // Erster Handler in der Kette: Commands und Prefix-Dialoge beanspruchen eine
+    // Nachricht, bevor der KI-Router sie ueberhaupt sieht.
+    runtime.router.registerMessageHandler('notifier', message => this.handleMessageCreate(message));
 
     this.client.on(Events.GuildMemberAdd, member => {
       void this.handleGuildMemberAdd(member).catch(error => {
@@ -984,16 +971,9 @@ export class DiscordNotifier implements Notifier {
 
     if (!this.readyPromise) {
       this.readyPromise = (async () => {
-        const ready = once(this.client, Events.ClientReady);
         await this.adminState.load();
-        await this.client.login(env.DISCORD_BOT_TOKEN);
-        if (!this.client.isReady()) {
-          await ready;
-        }
-        this.client.user?.setPresence({
-          activities: [{ name: DISCORD_ACTIVITY_NAME, type: ActivityType.Watching }],
-          status: 'online',
-        });
+        // Login gehoert der Runtime -- hier steht bewusst kein client.login().
+        await this.runtime.login(env.DISCORD_BOT_TOKEN);
         await this.registerCommands();
         this.startReminderLoop();
       })();
@@ -1623,21 +1603,24 @@ export class DiscordNotifier implements Notifier {
     });
   }
 
-  private async handleMessageCreate(message: import('discord.js').Message): Promise<void> {
+  // `true` = Nachricht ist verbraucht (Prefix-Dialog) und darf nicht mehr an den
+  // KI-Router weitergereicht werden.
+  private async handleMessageCreate(message: import('discord.js').Message): Promise<boolean> {
     if (message.author.bot) {
-      return;
+      return false;
     }
 
     if (message.content.startsWith('!remind ')) {
       await this.handlePrefixReminder(message);
-      return;
+      return true;
     }
 
     if (!message.guild) {
-      return;
+      return false;
     }
 
     await this.applySpamModeration(message);
+    return false;
   }
 
   private async handlePrefixReminder(message: import('discord.js').Message): Promise<void> {

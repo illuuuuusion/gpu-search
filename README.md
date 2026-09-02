@@ -37,10 +37,15 @@ src/
     valorant/
   integrations/
     discord/
+      ai/          # KI-Agent: Socket, Policy, Freigaben, Audit
+      routing/     # Message-/Reaction-Dispatch
+      runtime/     # einziger Discord-Client + login()
   scripts/
     gpu/
     valorant/
     ops/
+tools/
+  claude-gpu-search-channel/   # Claude-Channel-Sidecar (ohne Discord-Token)
 ```
 
 ## Schnellstart
@@ -150,6 +155,9 @@ curl localhost:9464/metrics
 - **Persistenz ist JSON, kein DBMS.** Die Write-Serialisierung ist prozesslokal —
   der Betrieb ist auf einen einzelnen `gpu-search`-Prozess pro State-Datei ausgelegt.
 - `B2` (Deal-Timing) wird erst mit genügend eigener Laufzeit-Historie aussagekräftig.
+- **Der KI-Agent ist erst als Gerüst vorhanden** (`AI_AGENT_ENABLED=false`). Policy,
+  Freigaben, Audit, Allowlists und der lokale Socket stehen; es ist aber noch **kein
+  Admin-Tool registriert**. Details in [`docs/ai-agent/`](docs/ai-agent/architecture.md).
 
 ## Was ich als Nächstes ergänzen würde
 

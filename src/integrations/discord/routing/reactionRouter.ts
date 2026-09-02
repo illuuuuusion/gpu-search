@@ -1,5 +1,5 @@
 import type { MessageReaction } from 'discord.js';
-import type { ReactionRoute } from '../../app/shared/botBindings.js';
+import type { ReactionRoute } from '../../../app/shared/botBindings.js';
 
 export interface ReactionEvent {
   emoji: string;

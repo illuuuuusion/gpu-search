@@ -1,8 +1,10 @@
 import './shared/telemetry.js'; // Seiteneffekt: Telemetrie-SDK vor allem anderen starten
 import { GpuModule } from '../domains/gpu/module.js';
 import { ValorantModule } from '../domains/valorant/module.js';
-import { env } from './env/index.js';
+import { aiAgentConfig, env } from './env/index.js';
 import { DiscordNotifier } from '../integrations/discord/notifier.js';
+import { DiscordRuntime } from '../integrations/discord/runtime/discordRuntime.js';
+import { AiAgentModule } from '../integrations/discord/ai/agentModule.js';
 import { ConsoleNotifier } from './shared/notifier/index.js';
 import { logger } from './shared/logger.js';
 
@@ -17,16 +19,30 @@ async function bootstrap(): Promise<void> {
   const valorantModule = env.VALORANT_ENABLED
     ? new ValorantModule()
     : undefined;
-  const notifier = env.NOTIFIER_PROVIDER === 'discord'
+  // Ein Gateway-Client fuer alles: Notifier, Commands, Reactions und KI-Agent.
+  const discordRuntime = env.NOTIFIER_PROVIDER === 'discord' ? new DiscordRuntime() : undefined;
+  const notifier = discordRuntime
     ? new DiscordNotifier({
         ...gpuModule.getNotifierBindings(),
         ...(valorantModule ? valorantModule.getNotifierBindings() : {}),
-      })
+      }, discordRuntime)
     : new ConsoleNotifier();
   gpuModule.attachNotifier(notifier);
 
   if ('start' in notifier && typeof notifier.start === 'function') {
     await notifier.start();
+  }
+
+  if (discordRuntime && aiAgentConfig) {
+    try {
+      const aiAgent = new AiAgentModule(discordRuntime, aiAgentConfig);
+      await aiAgent.start();
+      process.once('SIGTERM', () => void aiAgent.stop());
+      process.once('SIGINT', () => void aiAgent.stop());
+    } catch (error) {
+      // Faellt die KI-Anbindung aus, laufen Scanner, Commands und Reminder weiter.
+      logger.error({ error }, 'ai agent module failed to start; continuing without agent channel');
+    }
   }
 
   if (valorantModule) {

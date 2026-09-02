@@ -1,0 +1,39 @@
+{
+  "$comment": "Vorlage fuer die Claude-Code-Session des gpu-search-Agenten. Nach .claude/settings.json kopieren und anpassen. Grundregel: nur lesende Discord-Tools sind automatisch erlaubt, alles andere fragt nach, destruktive Werkzeuge sind gesperrt.",
+  "permissions": {
+    "defaultMode": "ask",
+    "allow": [
+      "mcp__gpu_search__get_guild_info",
+      "mcp__gpu_search__list_channels",
+      "mcp__gpu_search__view_channel_permissions",
+      "mcp__gpu_search__list_roles",
+      "mcp__gpu_search__get_role_permissions",
+      "mcp__gpu_search__list_members",
+      "mcp__gpu_search__get_member",
+      "mcp__gpu_search__get_member_permissions",
+      "mcp__gpu_search__get_audit_log",
+      "mcp__gpu_search__list_bans",
+      "mcp__gpu_search__list_invites",
+      "mcp__gpu_search__list_webhooks",
+      "mcp__gpu_search__list_automod_rules",
+      "mcp__gpu_search__get_messages"
+    ],
+    "deny": [
+      "mcp__gpu_search__delete_channel",
+      "mcp__gpu_search__delete_role",
+      "mcp__gpu_search__kick_member",
+      "mcp__gpu_search__ban_member",
+      "mcp__gpu_search__bulk_ban",
+      "mcp__gpu_search__prune_members",
+      "mcp__gpu_search__bulk_delete_messages",
+      "mcp__gpu_search__purge_user_messages",
+      "mcp__gpu_search__delete_webhook",
+      "mcp__gpu_search__delete_integration",
+      "mcp__gpu_search__edit_server",
+      "mcp__gpu_search__create_webhook",
+      "mcp__gpu_search__send_direct_message",
+      "Bash",
+      "WebFetch"
+    ]
+  }
+}

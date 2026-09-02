@@ -9,3 +9,6 @@ vendor/chromium-libs/
 # Laufzeit-State des Matrix-Bots (kein Secret, wird zur Laufzeit erzeugt)
 matrix-bot.json
 .DS_Store
+
+# Persoenliche Claude-Code-Settings (Vorlage: .claude/settings.example.json)
+.claude/settings.local.json

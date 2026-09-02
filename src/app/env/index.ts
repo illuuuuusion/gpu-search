@@ -5,7 +5,7 @@ import { z } from 'zod';
 // Docker-Secrets-Support: fuer sensible Werte darf statt des Klartext-Env-Vars
 // ein `${NAME}_FILE` gesetzt sein, das auf eine Datei zeigt (z. B. /run/secrets/x).
 // Fehler beim Lesen werden bewusst nicht abgefangen -> Fail-Fast vor jedem Login.
-const SECRET_FILE_VARS = ['DISCORD_BOT_TOKEN', 'EBAY_CLIENT_SECRET'] as const;
+const SECRET_FILE_VARS = ['DISCORD_BOT_TOKEN', 'EBAY_CLIENT_SECRET', 'AI_SOCKET_SECRET'] as const;
 
 export function resolveSecretFileOverrides(): void {
   for (const name of SECRET_FILE_VARS) {
@@ -118,6 +118,24 @@ const envSchema = z.object({
   VALORANT_VLR_MAX_EVENT_PAGES: z.coerce.number().min(1).max(10).default(3),
   VALORANT_VLR_MAX_MATCH_TIMESTAMP_LOOKUPS: z.coerce.number().min(1).max(500).default(60),
   VALORANT_VLR_RECENT_MATCH_DAYS: z.coerce.number().min(1).max(180).default(45),
+  // KI-Agent (Claude-Channel-Sidecar). Standardmaessig aus; bei `true` erzwingt
+  // validateAiAgentConfig() unten Guild, Allowlists und Socket-Secret.
+  AI_AGENT_ENABLED: booleanFromString.default(false),
+  AI_GUILD_ID: optionalString,
+  AI_SOCKET_PATH: z.string().default('data/runtime/claude-channel.sock'),
+  // Wert kommt ueber AI_SOCKET_SECRET_FILE aus einer Datei (siehe SECRET_FILE_VARS).
+  AI_SOCKET_SECRET: optionalString,
+  AI_ALLOWED_USER_IDS: z.string().default(''),
+  AI_OWNER_USER_IDS: z.string().default(''),
+  AI_ALLOWED_CHANNEL_IDS: z.string().default(''),
+  AI_PROTECTED_CHANNEL_IDS: z.string().default(''),
+  AI_PROTECTED_ROLE_IDS: z.string().default(''),
+  AI_REQUIRE_MENTION: booleanFromString.default(true),
+  AI_APPROVAL_TTL_SECONDS: positiveInteger.default(300),
+  AI_REQUEST_CONTEXT_TTL_SECONDS: positiveInteger.default(900),
+  AI_AUDIT_LOG_PATH: z.string().default('data/runtime/ai-audit.log'),
+  // Phase 4: destruktive Tools werden ohne dieses Flag gar nicht erst registriert.
+  AI_DESTRUCTIVE_TOOLS_ENABLED: booleanFromString.default(false),
 });
 
 function requireValue(value: string | undefined, name: string): string {
@@ -128,7 +146,7 @@ function requireValue(value: string | undefined, name: string): string {
   return value;
 }
 
-interface AppEnv {
+export interface AppEnv {
   EBAY_PROVIDER: 'live' | 'sandbox' | 'mock';
   EBAY_APP_ID: string;
   EBAY_CLIENT_SECRET: string;
@@ -198,6 +216,20 @@ interface AppEnv {
   VALORANT_VLR_MAX_EVENT_PAGES: number;
   VALORANT_VLR_MAX_MATCH_TIMESTAMP_LOOKUPS: number;
   VALORANT_VLR_RECENT_MATCH_DAYS: number;
+  AI_AGENT_ENABLED: boolean;
+  AI_GUILD_ID?: string;
+  AI_SOCKET_PATH: string;
+  AI_SOCKET_SECRET?: string;
+  AI_ALLOWED_USER_IDS: string;
+  AI_OWNER_USER_IDS: string;
+  AI_ALLOWED_CHANNEL_IDS: string;
+  AI_PROTECTED_CHANNEL_IDS: string;
+  AI_PROTECTED_ROLE_IDS: string;
+  AI_REQUIRE_MENTION: boolean;
+  AI_APPROVAL_TTL_SECONDS: number;
+  AI_REQUEST_CONTEXT_TTL_SECONDS: number;
+  AI_AUDIT_LOG_PATH: string;
+  AI_DESTRUCTIVE_TOOLS_ENABLED: boolean;
 }
 
 const parsed = envSchema.parse(process.env);
@@ -234,3 +266,64 @@ export function getEbayApiBaseUrl(): string {
     ? 'https://api.sandbox.ebay.com'
     : 'https://api.ebay.com';
 }
+
+export interface AiAgentConfig {
+  guildId: string;
+  socketPath: string;
+  socketSecret: string;
+  allowedUserIds: Set<string>;
+  ownerUserIds: Set<string>;
+  allowedChannelIds: Set<string>;
+  protectedChannelIds: Set<string>;
+  protectedRoleIds: Set<string>;
+  requireMention: boolean;
+  approvalTtlSeconds: number;
+  requestContextTtlSeconds: number;
+  auditLogPath: string;
+  destructiveToolsEnabled: boolean;
+}
+
+// Fail-Fast: mit aktivierter KI-Funktion darf der Prozess ohne Guild, ohne
+// Owner-/User-/Channel-Allowlist oder ohne Socket-Secret nicht starten.
+export function validateAiAgentConfig(source: AppEnv = env): AiAgentConfig {
+  const missing: string[] = [];
+  const requireId = (value: string | undefined, name: string): string => {
+    if (!value) {
+      missing.push(name);
+    }
+    return value ?? '';
+  };
+  const requireIds = (value: string, name: string): Set<string> => {
+    const ids = parseIdList(value);
+    if (ids.size === 0) {
+      missing.push(name);
+    }
+    return ids;
+  };
+
+  const config: AiAgentConfig = {
+    guildId: requireId(source.AI_GUILD_ID, 'AI_GUILD_ID'),
+    socketPath: source.AI_SOCKET_PATH,
+    socketSecret: requireId(source.AI_SOCKET_SECRET, 'AI_SOCKET_SECRET_FILE'),
+    allowedUserIds: requireIds(source.AI_ALLOWED_USER_IDS, 'AI_ALLOWED_USER_IDS'),
+    ownerUserIds: requireIds(source.AI_OWNER_USER_IDS, 'AI_OWNER_USER_IDS'),
+    allowedChannelIds: requireIds(source.AI_ALLOWED_CHANNEL_IDS, 'AI_ALLOWED_CHANNEL_IDS'),
+    protectedChannelIds: parseIdList(source.AI_PROTECTED_CHANNEL_IDS),
+    protectedRoleIds: parseIdList(source.AI_PROTECTED_ROLE_IDS),
+    requireMention: source.AI_REQUIRE_MENTION,
+    approvalTtlSeconds: source.AI_APPROVAL_TTL_SECONDS,
+    requestContextTtlSeconds: source.AI_REQUEST_CONTEXT_TTL_SECONDS,
+    auditLogPath: source.AI_AUDIT_LOG_PATH,
+    destructiveToolsEnabled: source.AI_DESTRUCTIVE_TOOLS_ENABLED,
+  };
+
+  if (missing.length > 0) {
+    throw new Error(`AI_AGENT_ENABLED=true requires: ${missing.join(', ')}`);
+  }
+
+  return config;
+}
+
+export const aiAgentConfig: AiAgentConfig | undefined = env.AI_AGENT_ENABLED
+  ? validateAiAgentConfig()
+  : undefined;
