@@ -118,9 +118,6 @@ const envSchema = z.object({
   VALORANT_VLR_MAX_EVENT_PAGES: z.coerce.number().min(1).max(10).default(3),
   VALORANT_VLR_MAX_MATCH_TIMESTAMP_LOOKUPS: z.coerce.number().min(1).max(500).default(60),
   VALORANT_VLR_RECENT_MATCH_DAYS: z.coerce.number().min(1).max(180).default(45),
-  VALORANT_LIQUIPEDIA_API_BASE_URL: z.string().default('https://liquipedia.net/valorant/api.php'),
-  VALORANT_LIQUIPEDIA_USER_AGENT: z.string().default('gpu-search/0.1 (contact: you@example.com)'),
-  VALORANT_LIQUIPEDIA_MIN_REQUEST_INTERVAL_MS: milliseconds.default(3500),
 });
 
 function requireValue(value: string | undefined, name: string): string {
@@ -201,9 +198,6 @@ interface AppEnv {
   VALORANT_VLR_MAX_EVENT_PAGES: number;
   VALORANT_VLR_MAX_MATCH_TIMESTAMP_LOOKUPS: number;
   VALORANT_VLR_RECENT_MATCH_DAYS: number;
-  VALORANT_LIQUIPEDIA_API_BASE_URL: string;
-  VALORANT_LIQUIPEDIA_USER_AGENT: string;
-  VALORANT_LIQUIPEDIA_MIN_REQUEST_INTERVAL_MS: number;
 }
 
 const parsed = envSchema.parse(process.env);

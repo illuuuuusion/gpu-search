@@ -45,9 +45,11 @@ src/
 
 ## Schnellstart
 
+Voraussetzung: **Node.js 22** (siehe `engines` in der `package.json` und das Dockerfile).
+
 1. Abhängigkeiten installieren
    ```bash
-   npm install
+   npm ci
    ```
 2. Umgebungsvariablen setzen
    ```bash
@@ -60,6 +62,10 @@ src/
    - Fuer lokale Tests `NOTIFIER_PROVIDER=console` lassen
    - Fuer Discord `NOTIFIER_PROVIDER=discord` setzen und `DISCORD_BOT_TOKEN` plus `DISCORD_CHANNEL_ID` eintragen
    - Scanner-`seen` und Marktstatistiken landen unter `data/scanner-state.json`
+   - `DISCORD_BOT_TOKEN` und `EBAY_CLIENT_SECRET` lassen sich statt direkt auch per
+     Datei setzen — `DISCORD_BOT_TOKEN_FILE` bzw. `EBAY_CLIENT_SECRET_FILE` zeigen
+     dann auf die Datei (z. B. `/run/secrets/...`), passend für Docker-Secrets.
+     Secrets werden in Logs über `pino`-`redact` maskiert.
 4. Entwicklung starten
    ```bash
    npm run dev
@@ -67,6 +73,15 @@ src/
 
 ## Lokale Tests
 
+- Typecheck und Testsuite (läuft ohne echten eBay- oder Discord-Zugang):
+  ```bash
+  npm run lint   # tsc --noEmit
+  npm test       # Build + node:test, aktuell 74 Tests
+  ```
+- Audit der Produktionsabhängigkeiten:
+  ```bash
+  npm audit --omit=dev --audit-level=high
+  ```
 - Ein end-to-end Mock-Scan mit Discord oder Console und frischem Test-State:
   ```bash
   npm run build
@@ -108,6 +123,33 @@ curl localhost:9464/metrics
 - Discord-Notifier
 - erweiterte Board-/Modellerkennung aus `localizedAspects`, Descriptor-/Property-Feldern und Beschreibungstexten
 - persistente `seen`-Speicherung und rollierende Durchschnittswerte für Score, Gebraucht- und Defektpreise
+- **Retries und Rate-Limit-Handling** für eBay-HTTP-Calls sowie Sende-Throttling für Discord
+- **atomare State-Writes mit Backup-Rotation** (`src/app/shared/atomicFile.ts`);
+  Writes sind pro Zieldatei serialisiert, Temp-Dateien eindeutig pro Schreibvorgang
+- **Secrets aus Dateien** (`*_FILE`) und Log-Redaction über `pino`
+- **Reaction-Infrastruktur mit Allowlist**: 👍/👎/🚫/⏰/🔥/🧊 auf Alerts, Reaktionen
+  nicht erlaubter Accounts werden still ignoriert (`REACTIONS_ENABLED`)
+- adaptive Akzeptanzschwelle und Dream-Deal-Score, per Reaction nachjustierbar
+- Fehltreffer-Meldung mit profil-spezifischen Laufzeit-Ausschlüssen
+  (`data/runtime-exclusions.json`, `/exclusions review|undo`)
+- Auktions-Reminder, die einen Prozess-Neustart überleben
+- Valorant-Domain (VLR als Provider) mit eigenem Sync-Scheduler und Fehlerisolation
+- OpenTelemetry-/Prometheus-Metriken und Spans (siehe oben)
+- Property-based Tests via `fast-check`
+
+## Aktuelle Grenzen
+
+- **Version `0.1.0`, kein produktiver Deployment-Prozess.** Der Funktionsumfang ist
+  weitgehend vollständig, aber mehrere Features sind noch nicht mit echten Discord-
+  und eBay-Daten abgenommen — offene Punkte in [`TODO-USER.md`](TODO-USER.md),
+  Protokoll in [`docs/acceptance/current-bot.md`](docs/acceptance/current-bot.md).
+- **B4 (Kleinanzeigen-Arbitrage)** ist nur ein Codegerüst und per Feature-Flag
+  deaktiviert. Nicht aktivieren, solange ToS-Frage und Live-Selektoren offen sind.
+- **A6 (Liquipedia)** wird nicht umgesetzt; der tote Client wurde entfernt.
+  Aktiver Valorant-Provider ist VLR.
+- **Persistenz ist JSON, kein DBMS.** Die Write-Serialisierung ist prozesslokal —
+  der Betrieb ist auf einen einzelnen `gpu-search`-Prozess pro State-Datei ausgelegt.
+- `B2` (Deal-Timing) wird erst mit genügend eigener Laufzeit-Historie aussagekräftig.
 
 ## Was ich als Nächstes ergänzen würde
 
@@ -120,5 +162,6 @@ curl localhost:9464/metrics
 
 ## Hinweise
 
-- Für produktive Nutzung solltest du Rate Limits, Retry-Strategien und dedizierte Speicherung ergänzen.
+- Rate-Limit- und Retry-Behandlung sind implementiert. Für den produktiven Dauerbetrieb
+  bleibt vor allem die Ablösung der JSON-Persistenz durch eine echte Datenbank offen.
 - Die Benachrichtigungen enthalten absichtlich keinen eBay-Verkäufer-Usernamen, damit keine eBay-Nutzerkennung in externen Alert-Kanälen wie Discord weiterverbreitet wird.

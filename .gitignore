@@ -5,3 +5,7 @@ node_modules/
 data/
 vendor/chromium-debs/
 vendor/chromium-libs/
+
+# Laufzeit-State des Matrix-Bots (kein Secret, wird zur Laufzeit erzeugt)
+matrix-bot.json
+.DS_Store

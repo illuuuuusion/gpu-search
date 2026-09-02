@@ -35,3 +35,38 @@ test('writeFileAtomic with backupCount 0 writes no backups', async () => {
     await fs.rm(dir, { recursive: true, force: true });
   }
 });
+
+test('writeFileAtomic survives 20 concurrent writes to the same target', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'gpu-search-atomic-'));
+  const file = path.join(dir, 'state.json');
+  try {
+    const writes = Array.from({ length: 20 }, (_unused, i) =>
+      writeFileAtomic(file, JSON.stringify({ run: i }), 3),
+    );
+    // Kein Write darf mit ENOENT (o.ae.) scheitern -- das war der Race.
+    const results = await Promise.allSettled(writes);
+    const failed = results.filter((r) => r.status === 'rejected');
+    assert.deepEqual(
+      failed.map((r) => String((r as PromiseRejectedResult).reason)),
+      [],
+    );
+
+    // Hauptdatei ist gueltiges JSON von genau einem der Writes.
+    const parsed = JSON.parse(await fs.readFile(file, 'utf8')) as { run: number };
+    assert.ok(Number.isInteger(parsed.run) && parsed.run >= 0 && parsed.run < 20);
+
+    // Backups sind ebenfalls vollstaendiges JSON, nie ein halber Write.
+    for (const name of ['state.json.bak.1', 'state.json.bak.2', 'state.json.bak.3']) {
+      const backup = JSON.parse(await fs.readFile(path.join(dir, name), 'utf8')) as {
+        run: number;
+      };
+      assert.ok(Number.isInteger(backup.run));
+    }
+
+    // Keine verwaisten Temp-Dateien.
+    const leftovers = (await fs.readdir(dir)).filter((name) => name.endsWith('.tmp'));
+    assert.deepEqual(leftovers, []);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});

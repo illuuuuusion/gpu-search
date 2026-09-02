@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'   # gepinnt auf die Major aus dem Dockerfile (node:22-bookworm-slim)
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run lint
+
+      - run: npm test
+
+      # Produktionsabhaengigkeiten duerfen keine High/Critical-Findings haben.
+      - name: npm audit (production dependencies)
+        run: npm audit --omit=dev --audit-level=high
