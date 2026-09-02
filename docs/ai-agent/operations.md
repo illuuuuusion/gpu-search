@@ -81,11 +81,13 @@ wirklich brauchen. **Keine `Administrator`-Berechtigung.**
 | Manage Server | `list_invites`, `list_automod_rules` |
 | Ban Members | `list_bans` |
 
-Achtung bei den letzten drei: `Manage Webhooks`, `Manage Server` und `Ban Members` sind
-**schreibfähige** Discord-Rechte. Der Prozess nutzt sie in Phase 2 nur lesend — die
-Tool-Policy lässt nichts anderes zu —, aber das Token könnte bei Kompromittierung mehr.
-Wer das nicht will, verzichtet auf `list_bans`, `list_invites`, `list_webhooks` und
-`list_automod_rules` und vergibt die drei Rechte nicht.
+`Manage Webhooks`, `Manage Server` und `Ban Members` sind **schreibfähige** Discord-Rechte.
+Der Prozess nutzt sie nur lesend — die Tool-Policy lässt nichts anderes zu —, aber das
+Token könnte bei Kompromittierung mehr.
+
+**Entschieden (3. September 2026): Der Bot hat diese Rechte bereits, alle vier Werkzeuge
+bleiben registriert.** Der Verzicht auf `list_bans`, `list_invites`, `list_webhooks` und
+`list_automod_rules` wäre die Alternative gewesen und ist bewusst nicht gewählt worden.
 
 Das privilegierte Gateway-Intent `GUILD_MEMBERS` ist bereits aktiv (der Bot nutzt es für
 Welcome-Nachrichten) und wird von `list_members`/`get_member` mitverwendet.
